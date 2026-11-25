@@ -105,21 +105,22 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (Credenti
 	} else if revoked {
 		return CredentialResult{}, refuse(oid4vci.ErrCredentialRequestDenied, "the offer has been revoked")
 	}
-	keys, err := s.holderKeys(ctx, p, p.requiresKeyAttestation(token.WalletProvider), id, req.Proofs)
-	if err != nil {
-		return CredentialResult{}, err
-	}
 	// After a configuration change the configuration may belong to another
 	// provider; this provider then no longer offers it.
 	c, ok := s.configs[doc.ConfigurationID]
 	if !ok || c.Provider != prov.Name {
 		return CredentialResult{}, refuse(oid4vci.ErrUnknownCredentialID, "the credential configuration is no longer offered")
 	}
+	toNLWallet := p.toNLWallet(token.WalletProvider)
+	keys, err := s.holderKeys(ctx, p, p.requiresKeyAttestation(token.WalletProvider), id, req.Proofs, s.batchSize(p, c, toNLWallet))
+	if err != nil {
+		return CredentialResult{}, err
+	}
 
 	if session.Pending != nil && doc.Claims == nil {
 		return s.deferCredential(ctx, prov, session, doc, keys, encrypter, now)
 	}
-	return s.issueOnce(ctx, prov, p, c, session, doc, p.toNLWallet(token.WalletProvider), keys, encrypter, now)
+	return s.issueOnce(ctx, prov, p, c, session, doc, toNLWallet, keys, encrypter, now)
 }
 
 // issueOnce issues the credentials of one document to keys, once: the
@@ -297,8 +298,9 @@ func (s *Service) authorize(ctx context.Context, t Target, header, scheme string
 }
 
 // holderKeys verifies the key proofs and returns the keys to bind the
-// credentials to. All proofs must carry the same c_nonce, which is used up.
-func (s *Service) holderKeys(ctx context.Context, p Profile, mustAttest bool, id string, proofs *oid4vci.Proofs) ([]jose.JSONWebKey, error) {
+// credentials to, at most batchSize. All proofs must carry the same
+// c_nonce, which is used up.
+func (s *Service) holderKeys(ctx context.Context, p Profile, mustAttest bool, id string, proofs *oid4vci.Proofs, batchSize int) ([]jose.JSONWebKey, error) {
 	if proofs == nil || (len(proofs.JWT) == 0) == (len(proofs.Attestation) == 0) {
 		return nil, refuse(oid4vci.ErrInvalidProof, "proofs must contain jwt or attestation proofs")
 	}
@@ -367,8 +369,10 @@ func (s *Service) holderKeys(ctx context.Context, p Profile, mustAttest bool, id
 	if err != nil {
 		return nil, err
 	}
-	if len(keys) > s.cfg.BatchSize {
-		return nil, refuse(oid4vci.ErrInvalidProof, fmt.Sprintf("at most %d keys per request", s.cfg.BatchSize))
+	// More keys than the batch size are refused rather than capped; which
+	// of the two is an open question in the technical design.
+	if len(keys) > batchSize {
+		return nil, refuse(oid4vci.ErrInvalidProof, fmt.Sprintf("at most %d keys per request", batchSize))
 	}
 	for _, n := range nonces {
 		// A proof without c_nonce is an invalid proof (section 8.3.1.2).

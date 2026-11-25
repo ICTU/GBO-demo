@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"gbo-demo/eudi-credential-issuer/internal/config"
+	"gbo-demo/eudi-credential-issuer/internal/democontrol"
 	"gbo-demo/eudi-credential-issuer/internal/httpapi"
 	"gbo-demo/eudi-credential-issuer/internal/issuance"
 	"gbo-demo/eudi-credential-issuer/internal/login"
@@ -112,6 +113,11 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		return fmt.Errorf("login: %w", err)
 	}
 	selectors := configureTestPersonLogins(&cfg, loaded.TestPersonLogins, st, time.Now)
+	// Demo shortcut: the developer portal changes the batch settings at
+	// runtime, in memory. A real deployment keeps the configured settings
+	// and leaves democontrol out.
+	overrides := democontrol.NewOverrides(cfg, issuance.ConfiguredSettings(cfg))
+	cfg.Settings = overrides
 	svc, err := issuance.New(cfg, src, st, st, st, time.Now)
 	if err != nil {
 		return err
@@ -122,8 +128,11 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	for _, selector := range selectors {
 		mux.Handle(selector.Path(), testloginhttp.Handler(selector, splitList(env("ISSUER_WALLET_REDIRECT_URIS", "eu.europa.ec.euidi://authorization"))...))
 	}
+	internalMux := http.NewServeMux()
+	internalMux.Handle("/", httpapi.Internal(svc, log))
+	internalMux.Handle("/demo/", democontrol.Handler(overrides))
 	public := &http.Server{Addr: env("ISSUER_LISTEN_ADDR", ":8080"), Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	internal := &http.Server{Addr: env("ISSUER_INTERNAL_ADDR", ":8081"), Handler: httpapi.Internal(svc, log), ReadHeaderTimeout: 10 * time.Second}
+	internal := &http.Server{Addr: env("ISSUER_INTERNAL_ADDR", ":8081"), Handler: internalMux, ReadHeaderTimeout: 10 * time.Second}
 	errs := make(chan error, 2)
 	for _, srv := range []*http.Server{public, internal} {
 		go func() {

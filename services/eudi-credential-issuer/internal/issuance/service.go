@@ -118,6 +118,9 @@ func setDefaults(cfg *Config) {
 	if cfg.BatchSize == 0 {
 		cfg.BatchSize = DefaultBatchSize
 	}
+	if cfg.Settings == nil {
+		cfg.Settings = ConfiguredSettings(*cfg)
+	}
 	if cfg.OfferTTL == 0 {
 		cfg.OfferTTL = DefaultOfferTTL
 	}

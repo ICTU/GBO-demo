@@ -24,7 +24,7 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | Client authentication with a Wallet Instance Attestation and PoP over a server challenge (draft-ietf-oauth-attestation-based-client-auth -07, as OpenID4VCI 1.0 references it; HAIP section 4.4) | implemented; the challenge is required, and a missing or unknown one is answered with `use_attestation_challenge` (400) and a fresh challenge in `OAuth-Client-Attestation-Challenge`. `iss` and `iat` are not required in the attestation, so attestations made after -07 and after -12 are both accepted |
 | DPoP-bound access tokens (RFC 9449) | implemented; server DPoP nonces are not used |
 | Nonce endpoint, single-use `c_nonce` (section 7) | implemented |
-| Credential endpoint with `credential_identifier`, batch issuance (section 8) | implemented; one request per credential identifier |
+| Credential endpoint with `credential_identifier`, batch issuance (section 8) | implemented; one request per credential identifier. `batch_credential_issuance` is per provider (its issuer identifiers), so all its configurations share one batch size; a configuration gets its own through a reuse policy |
 | Encrypted credential requests and responses (sections 8.2 and 10) | implemented for the `eudi` profile, not required: ECDH-ES on P-256 with A128GCM or A256GCM, no compression. A wallet that asks for an encrypted response must encrypt its request (section 8.2), otherwise `invalid_encryption_parameters`. Each provider has its own request key; its `kid` is the JWK thumbprint, so a wallet holding metadata from before a new key gets `invalid_credential_request` until it fetches the metadata again. Errors are not encrypted. On `nl`, an encrypted request or a `credential_response_encryption` parameter is an `invalid_credential_request` |
 | Key attestation in JWT format (Appendix D.1), `attestation` proof type (Appendix F.3), required levels in `key_attestations_required` (ARF ISSU_27d) | implemented for the `eudi` profile |
 | SD-JWT VC, `dc+sd-jwt` (HAIP section 6.1) | implemented; every attribute selectively disclosable. `iss` is the credential issuer identifier only when the issuer certificate names it as a SAN URI (the test PID) and the wallet is not the NL Wallet; otherwise it is omitted |
@@ -36,7 +36,7 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | Re-issuance with refresh tokens (RFC 6749 section 6; HAIP section 4.4) | implemented on `eudi`: every token response carries a `refresh_token`, valid 30 days, not rotated (FAPI 2.0 section 5.3.2.1: a refresh returns the same one), bound to the wallet (`client_id` of its attestation) and its DPoP key. A refresh issues the claims of the first issuance again under new credential identifiers; the source is not asked and no BSN is kept, but the claims are kept until the refresh token expires. A revoked offer reference stops it, and so does a deferred issuance that has not finished (`invalid_grant`). A refresh keeps the `nbf` and `exp` of the first issuance, so it does not lengthen a short-lived credential |
 | Deferred issuance (section 9) | implemented on `eudi` after a login: when the source is unavailable at the callback, the wallet still gets its code; the credential request answers `202` with a `transaction_id` and `interval` 5, and each deferred credential request asks the source again. See [Deferred issuance](#deferred-issuance) |
 | ISO mdoc | not yet |
-| `credential_reuse_policy` (ETSI TS 119 472-3; ARF ISSU_39) | not yet |
+| `credential_reuse_policy` (ETSI TS 119 472-3 clause 4.2.4; ARF ISSU_39) | implemented for `once_only` only (`arf_annex_ii`, with `batch_size` and `reissue_trigger_unused`), per credential configuration, on the profiles that serve the EUDI wallets (`eudi` and combined). A configuration with a policy holds an EUDI wallet to its `batch_size` (clause 4.2.4.2-14); the NL Wallet on the combined profile is held to the provider's. The configuration file sets no policy: the developer portal sets them through the demo settings API. `limited_time`, `rotating-batch` and `per-relying-party`: not yet |
 | Wallet provider and key attestation revocation (`client_status`, `status` in the key attestation) | not checked |
 | Disclosure-based issuance (presentation before the offer) | implemented on `eudi` and `nl`; see [Disclosure-based issuance](#disclosure-based-issuance). Not yet tested with the NL Wallet, so the developer portal keeps the current issuance server for it |
 
@@ -54,6 +54,7 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 - The bronpoort trusts the subject the offer caller names; the internal API does not authenticate that caller. A real deployment authenticates it, so the backend knows who vouches for the subject.
 - Revocation by reference spans providers: a reference is the caller's, not a provider's, so `{reference}` revokes what every provider issued for it. A real deployment lets each provider revoke only its own credentials.
 - `ISSUER_STORE=memory` keeps all state in memory, for a local run only.
+- The batch settings can be changed at runtime through `/demo/settings` on the internal port (`internal/democontrol`), so the developer portal can show what a wallet does with them. The changes live in memory; a restart brings back the configured settings. The core only knows the `issuance.Settings` port; a real deployment uses the configured settings and leaves `democontrol` out.
 
 ## Endpoints
 
@@ -85,6 +86,10 @@ Internal port (`ISSUER_INTERNAL_ADDR`, default `:8081`):
 |---|---|
 | `POST /offers` | `{profile, credential_configuration_ids, subject, parameters, reference?}` → `201 {credential_offer, links}`. The issuer fetches the data from the bronpoort now; `404 no_data`, `503 source_unavailable` or `502 bad_source_data` when that fails, and nothing is stored. `reference` is the caller's own reference for revocation; without one the credentials are valid for 24 hours. The provider follows from the configurations: an offer with configurations of two providers is a `400 mixed_providers` |
 | `POST /revocations` | `{reference}` revokes every credential issued for offers with that reference → `200 {revoked}`, and from then on nothing more is issued for it: an offer not yet redeemed gets `invalid_grant`, a token not yet used and a deferred transaction still waiting for the source get `credential_request_denied`. `{provider, list, index}` revokes one entry → 204. Anything else is a 400: a revocation cannot be undone, so nothing is guessed |
+| `GET /demo/settings` | demo: the batch settings in force, `{providers: [{name, batch_size, overridden}], configurations: [{id, provider, name, reuse_policy, batch_size, overridden}]}`; `batch_size` of a configuration is the one an EUDI wallet is held to |
+| `PUT /demo/settings/providers/{v}` | demo: `{batch_size}` (1 or more; 1 publishes no `batch_credential_issuance`) → `200` with the settings in force; `400 invalid_setting` with the reason, `404 unknown_provider` |
+| `PUT /demo/settings/configurations/{id}` | demo: `{reuse_policy: {method: "once_only", batch_size, reissue_trigger_unused}}`; the issuer checks it (batch size 2 or more, trigger 0 or more and below the batch size) → `200`, `400 invalid_setting`, `404 unknown_configuration` |
+| `DELETE /demo/settings/providers/{v}`, `DELETE /demo/settings/configurations/{id}` | demo: back to the configured setting → `200` |
 | `GET /healthz` | health |
 
 ## Disclosure-based issuance
@@ -282,6 +287,7 @@ The issuer refuses to start with a configuration a wallet would refuse: no `scop
 | `internal/login` | client of GBO's authorization server: registration, authorization request, code exchange, token checks |
 | `internal/postgres`, `internal/memstore` | stores; `internal/storetest` is the contract both pass |
 | `internal/config` | configuration file |
+| `internal/democontrol` | demo only: batch settings changed at runtime, and their API on the internal port |
 | `interop/` | separate module: the issuer driven by the OID4VCgo wallet |
 | `../oid4vc-kit` | protocol building blocks shared with future services |
 
@@ -295,7 +301,8 @@ The issuer refuses to start with a configuration a wallet would refuse: no `scop
 - A credential is marked as issued only after it is signed, so a failed request leaves it issuable. A request for a credential that has been issued is refused before anything else happens, so it uses up no status list entries.
 - A `client_id` in the token request must equal the `sub` of the Wallet Instance Attestation.
 - The signing certificate of an incoming Wallet Instance Attestation or key attestation must not be self-signed (HAIP).
-- For the `eudi` profile every key in a key attestation gets a credential (Appendix F.1: "SHOULD issue a Credential for each cryptographic public key specified in the attested_keys"); the number of keys is bounded by `batch_size`.
+- For the `eudi` profile every key in a key attestation gets a credential (Appendix F.1: "SHOULD issue a Credential for each cryptographic public key specified in the attested_keys"); the number of keys is bounded by the batch size in force: that of the configuration's reuse policy for an EUDI wallet, the provider's otherwise. The setting in force at the credential request counts, also for a re-issuance with a refresh token; credentials already issued are not affected.
+- More keys than the batch size are refused with `invalid_proof`. OpenID4VCI 1.0 defines `batch_size` as the maximum size of the `proofs` array (section 12.2.4) and lets the issuer issue fewer credentials than keys (sections 8.3 and 14.6), so capping at the batch size would conform too. Which of the two is an open question in the technical design. Fewer keys than the batch size give as many credentials as keys.
 - Client authentication and DPoP are checked before the pre-authorized code is used, and a code is only redeemed on the profile of its offer, so a refused request does not burn the code. The attestation challenge is used up either way.
 - DPoP `htu` is compared with the public URL, not the request URL, because the issuer runs behind a proxy.
 - Server-provided DPoP nonces are not used: the NL Wallet does not retry on `use_dpop_nonce`. Replay of a DPoP proof is blocked by its `jti` within the 60-second `iat` window.

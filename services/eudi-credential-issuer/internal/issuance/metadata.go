@@ -64,8 +64,8 @@ func (s *Service) issuerMetadata(t Target, prov *provider, p Profile) map[string
 	// Wallets show the issuer by this name (section 12.2.4). An
 	// organization name needs no translation, so it has no locale.
 	md["display"] = []map[string]string{{"name": issuerName(prov.AccessChain[0])}}
-	if s.cfg.BatchSize >= 2 {
-		md["batch_credential_issuance"] = map[string]any{"batch_size": s.cfg.BatchSize}
+	if n := s.cfg.Settings.BatchSize(prov.Name); n >= 2 {
+		md["batch_credential_issuance"] = map[string]any{"batch_size": n}
 	}
 	if p.Kind == KindEUDI {
 		md["notification_endpoint"] = id + "/notification"
@@ -124,13 +124,19 @@ func (s *Service) configurationMetadata(p Profile, c CredentialConfiguration) ma
 			"key_attestations_required":          required,
 		}
 	}
+	credentialMetadata := map[string]any{"display": c.Display, "claims": c.Claims}
+	// On a combined profile the EUDI wallets read the policy; the NL Wallet
+	// is held to the provider's batch size.
+	if policy, ok := s.reusePolicy(p, c, false); ok {
+		credentialMetadata["credential_reuse_policy"] = policy.metadata()
+	}
 	md := map[string]any{
 		"format": sdjwtvc.Type,
 		"vct":    c.VCT,
 		"cryptographic_binding_methods_supported": []string{"jwk"},
 		"credential_signing_alg_values_supported": []string{string(jose.ES256)},
 		"proof_types_supported":                   proofs,
-		"credential_metadata":                     map[string]any{"display": c.Display, "claims": c.Claims},
+		"credential_metadata":                     credentialMetadata,
 		"scope":                                   c.Scope,
 	}
 	return md
