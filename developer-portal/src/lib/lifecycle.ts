@@ -126,6 +126,7 @@ export function sessionChains(events: LifecycleEvent[]): SessionChain[] {
 const KIND_LABELS: Record<string, string> = {
   session_started: 'sessie gestart',
   token_issued: 'token',
+  token_refused: 'token geweigerd',
   credential_issued: 'uitgegeven',
   credential_deferred: 'uitgesteld',
   credential_refused: 'geweigerd',
@@ -164,6 +165,9 @@ export function describe(e: LifecycleEvent): string {
     case 'credential_issued':
       return [`${e.credentials ?? 0} ${e.credentials === 1 ? 'exemplaar' : 'exemplaren'} van ${e.configuration}`,
         `${e.keys_offered ?? 0} sleutels aangeboden`, batchText(e), PROOFS[e.proof_type ?? ''] ?? e.proof_type]
+        .filter(Boolean).join(' · ')
+    case 'token_refused':
+      return [GRANTS[e.grant_type ?? ''] ?? e.grant_type, `${e.error}${e.error_description ? `: ${e.error_description}` : ''}`]
         .filter(Boolean).join(' · ')
     case 'credential_deferred':
       return [`${e.configuration}: de bron antwoordde nog niet`, `${e.keys_offered ?? 0} sleutels aangeboden`]

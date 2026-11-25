@@ -314,6 +314,62 @@ func TestNoEventsPort(t *testing.T) {
 	}
 }
 
+// refreshing tries a refresh token at target with dpopKey and returns the
+// error, if any.
+func refreshing(t *testing.T, e env, target issuance.Target, refreshToken string, dpopKey *ecdsa.PrivateKey) error {
+	t.Helper()
+	ctx := context.Background()
+	wiaKey := testpki.NewKey(t)
+	challenge, err := e.svc.Challenge(ctx, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := e.svc.Identifier(target)
+	_, err = e.svc.Token(ctx, issuance.TokenRequest{
+		Target: target, GrantType: oid4vci.GrantRefreshToken, RefreshToken: refreshToken,
+		ClientAttestation:    e.provider.WIA(t, client, wiaKey, time.Now().Add(time.Hour)),
+		ClientAttestationPoP: testwallet.PoP(t, wiaKey, client, id, challenge),
+		DPoP:                 []string{testwallet.DPoP(t, dpopKey, "POST", id+"/token", "")},
+	})
+	return err
+}
+
+// A refused refresh is in the timeline of the session it would continue:
+// once its refresh token is known, so is the session.
+func TestRefusedRefreshEvents(t *testing.T) {
+	e, _, events := eventsEnv(t)
+	target := tax("eudi")
+	_, c := code(t, e, "eudi", "ref-refused", "income")
+	session := events.ofKind(issuance.EventSessionStarted)[0].Session
+	tok, dpopKey, err := token(t, e, "eudi", c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refusedWith(t, refreshing(t, e, target, tok.RefreshToken, testpki.NewKey(t)), oid4vci.ErrInvalidGrant)
+	if _, err := e.svc.RevokeReference(context.Background(), "ref-refused"); err != nil {
+		t.Fatal(err)
+	}
+	refusedWith(t, refreshing(t, e, target, tok.RefreshToken, dpopKey), oid4vci.ErrInvalidGrant)
+	refusedWith(t, refreshing(t, e, target, "unknown", dpopKey), oid4vci.ErrInvalidGrant)
+
+	refused := events.ofKind(issuance.EventTokenRefused)
+	if len(refused) != 2 {
+		t.Fatalf("token_refused events = %+v, want two: an unknown refresh token belongs to no session", refused)
+	}
+	for i, want := range []string{"another DPoP key", "revoked"} {
+		r := refused[i]
+		if r.Session != session || r.GrantType != oid4vci.GrantRefreshToken || r.Error != oid4vci.ErrInvalidGrant ||
+			!strings.Contains(r.ErrorDescription, want) || r.WalletProvider != "provider" {
+			t.Errorf("token_refused %d = %+v, want session %s and a reason with %q", i, r, session, want)
+		}
+	}
+	raw, _ := json.Marshal(refused)
+	if strings.Contains(string(raw), tok.RefreshToken) {
+		t.Error("an event holds the refresh token")
+	}
+}
+
 // A deferred issuance ends in the timeline too: still waiting is
 // credential_deferred again, the credential from the deferred request is
 // credential_issued with the holder key's fingerprint, in the same

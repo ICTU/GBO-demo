@@ -26,6 +26,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   The demo keeps those of the last 50 minutes in a schema of its own
   (`ISSUER_DEMO_DATABASE_SCHEMA`) and serves them at `/demo/events` on the
   internal API; without the port the core records nothing.
+- **Refused refresh tokens in the issuer's timeline** (#745): once a
+  refresh token is known, so is the session it would continue, so a refusal
+  (another wallet or DPoP key, a revoked offer, an expired deferral, a
+  session that is gone) becomes a `token_refused` event in that session,
+  with its reason; the portal shows it as "token geweigerd". An unknown
+  refresh token belongs to no session and stays out.
 - **Credential lifecycle block in the developer portal** (#745): in the EUDI
   tab, next to the revocation block, the batch size per source and the
   reuse policy per attestation type of the own credential issuer, with the
