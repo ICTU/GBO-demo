@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { changeLifecycleSetting, loadLifecycleEvents, loadLifecycleSettings } from '../api/devClient'
+import { changeLifecycleSetting, loadLifecycleEvents, loadLifecycleSettings, loadRPCatalog, loadRPEvents } from '../api/devClient'
 import {
-  describe, kindLabel, sessionChains, wholeNumber,
-  type ConfigurationSettings, type LifecycleEvent, type LifecycleSettings, type ProviderSettings,
+  copyOrigin, describe, describeRP, kindLabel, originChain, sessionChains, wholeNumber,
+  type ConfigurationSettings, type LifecycleEvent, type LifecycleSettings, type ProviderSettings, type RPCatalog, type RPEvent,
 } from '../lib/lifecycle'
+import TestRelyingPartyForm from './TestRelyingPartyForm'
 
 // The inputs as the revocation block styles them.
 const inputStyle = {
@@ -23,10 +24,22 @@ function fingerprintColour(fp: string): string {
 function kindColour(kind: string): string {
   switch (kind) {
     case 'credential_issued': return 'var(--ok, #2a7)'
-    case 'credential_refused': case 'token_refused': return 'var(--danger, #d33)'
-    case 'credential_deferred': return 'var(--warn, #c80)'
+    case 'credential_refused': case 'token_refused': case 'rejected': return 'var(--danger, #d33)'
+    case 'credential_deferred': case 'declined': return 'var(--warn, #c80)'
+    case 'presented': return 'var(--accent, #36c)'
     default: return 'var(--mute)'
   }
+}
+
+const RP_KIND_LABELS: Record<string, string> = { presented: 'getoond', declined: 'geweigerd', rejected: 'afgewezen' }
+
+function FingerprintChip({ fp }: { fp: string }) {
+  return (
+    <span className="mono" title="vingerafdruk van de sleutel van dit exemplaar"
+      style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, color: '#fff', background: fingerprintColour(fp) }}>
+      {fp}
+    </span>
+  )
 }
 
 type PolicyDraft = { policy: 'none' | 'once_only'; batch: string; trigger: string }
@@ -48,6 +61,8 @@ export default function CredentialLifecyclePanel() {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState('')
   const [live, setLive] = useState(true)
+  const [rpCatalog, setRPCatalog] = useState<RPCatalog>({ enabled: false })
+  const [rpEvents, setRPEvents] = useState<RPEvent[]>([])
 
   const reloadSettings = useCallback(async () => {
     const loaded = await loadLifecycleSettings()
@@ -59,19 +74,29 @@ export default function CredentialLifecyclePanel() {
     return loaded.enabled
   }, [])
 
-  const reloadEvents = useCallback(async () => setEvents(await loadLifecycleEvents()), [])
+  const reloadEvents = useCallback(async () => {
+    setEvents(await loadLifecycleEvents())
+    const presented = await loadRPEvents()
+    setRPEvents(Array.isArray(presented) ? presented : [])
+  }, [])
 
   useEffect(() => {
-    void reloadSettings().then((on) => { if (on) void reloadEvents() })
+    void reloadSettings().then(() => reloadEvents())
+    void loadRPCatalog().then(setRPCatalog)
   }, [reloadSettings, reloadEvents])
 
+  // The issuer's settings and timeline need CREDENTIAL_ISSUER_INTERNAL_URL;
+  // the presentation form and its list only TEST_RP_INTERNAL_URL.
+  const issuerOn = settings.enabled
+  const rpOn = rpCatalog.enabled
+
   useEffect(() => {
-    if (!settings.enabled || !live) return
+    if (!(issuerOn || rpOn) || !live) return
     const timer = window.setInterval(() => void reloadEvents(), POLL_MS)
     return () => window.clearInterval(timer)
-  }, [settings.enabled, live, reloadEvents])
+  }, [issuerOn, rpOn, live, reloadEvents])
 
-  if (!settings.enabled) return null
+  if (!issuerOn && !rpOn) return null
 
   const apply = async (key: string, label: string, change: () => Promise<string>) => {
     setBusy(key)
@@ -110,14 +135,20 @@ export default function CredentialLifecyclePanel() {
     setPolicyDrafts({ ...policyDrafts, [id]: { ...(policyDrafts[id] ?? policyDraft(c)), ...patch } })
 
   const chains = Array.isArray(events) ? sessionChains(events) : []
+  // The VCT of each issuer configuration, from the test relying party's
+  // catalog: a presentation is matched to an issuance by type, not by the
+  // configuration chosen in the form.
+  const vctOf = (configuration: string) =>
+    rpCatalog.enabled ? rpCatalog.credentials.find((c) => c.id === configuration)?.vct : undefined
 
   return (
     <div className="panel">
       <div className="panel-h">
-        <span className="t">Credential lifecycle · batch size</span>
+        <span className="t">Credential lifecycle{issuerOn ? ' · batch size' : ' · presentaties'}</span>
         <button className="mini" onClick={() => void reloadSettings().then(() => reloadEvents())} style={{ marginLeft: 'auto' }}>vernieuwen</button>
       </div>
       <div className="panel-b" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {settings.enabled && (<>
         <div className="hint" style={{ fontSize: 12, color: 'var(--mute)' }}>
           Hoeveel exemplaren de eigen credential issuer per uitgifte geeft. Per bron publiceert de issuer
           <span className="mono"> batch_credential_issuance</span>; een attestatietype kan een eigen hergebruikbeleid krijgen
@@ -200,7 +231,11 @@ export default function CredentialLifecyclePanel() {
             })}
           </tbody>
         </table>
+        </>)}
 
+        {rpCatalog.enabled && <TestRelyingPartyForm catalog={rpCatalog} events={rpEvents} />}
+
+        {issuerOn && (<>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <strong style={{ fontSize: 13 }}>Tijdlijn per wallet-sessie</strong>
           <span style={{ fontSize: 12, color: 'var(--mute)' }}>laatste 50 minuten · geen attribuutwaarden</span>
@@ -223,22 +258,26 @@ export default function CredentialLifecyclePanel() {
               </div>
               <table>
                 <tbody>
-                  {chain.events.map((e, i) => (
-                    <tr key={`${e.at}-${i}`}>
-                      <td className="mono" style={{ whiteSpace: 'nowrap', width: 1 }}>{new Date(e.at).toLocaleTimeString('nl-NL')}</td>
-                      <td style={{ whiteSpace: 'nowrap', width: 1, color: kindColour(e.kind), fontWeight: 600 }}>{kindLabel(e.kind)}</td>
+                  {timelineRows(chain).map((row, i) => row.issuer ? (
+                    <tr key={`${row.issuer.at}-${i}`}>
+                      <td className="mono" style={{ whiteSpace: 'nowrap', width: 1 }}>{new Date(row.issuer.at).toLocaleTimeString('nl-NL')}</td>
+                      <td style={{ whiteSpace: 'nowrap', width: 1, color: kindColour(row.issuer.kind), fontWeight: 600 }}>{kindLabel(row.issuer.kind)}</td>
                       <td style={{ fontSize: 12 }}>
-                        {describe(e)}
-                        {(e.key_fingerprints ?? []).length > 0 && (
+                        {describe(row.issuer)}
+                        {(row.issuer.key_fingerprints ?? []).length > 0 && (
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
-                            {e.key_fingerprints!.map((fp) => (
-                              <span key={fp} className="mono" title="vingerafdruk van de sleutel van dit exemplaar"
-                                style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, color: '#fff', background: fingerprintColour(fp) }}>
-                                {fp}
-                              </span>
-                            ))}
+                            {row.issuer.key_fingerprints!.map((fp) => <FingerprintChip key={fp} fp={fp} />)}
                           </div>
                         )}
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr key={`${row.rp!.at}-rp-${i}`}>
+                      <td className="mono" style={{ whiteSpace: 'nowrap', width: 1 }}>{new Date(row.rp!.at).toLocaleTimeString('nl-NL')}</td>
+                      <td style={{ whiteSpace: 'nowrap', width: 1, color: kindColour(row.rp!.kind), fontWeight: 600 }}>{RP_KIND_LABELS[row.rp!.kind] ?? row.rp!.kind}</td>
+                      <td style={{ fontSize: 12 }}>
+                        {describeRP(row.rp!, copyOrigin(chains, row.rp!, vctOf))}
+                        {row.rp!.key_fingerprint && <div style={{ marginTop: 4 }}><FingerprintChip fp={row.rp!.key_fingerprint} /></div>}
                       </td>
                     </tr>
                   ))}
@@ -247,7 +286,41 @@ export default function CredentialLifecyclePanel() {
             </div>
           ))
         )}
+        </>)}
+
+        {rpCatalog.enabled && (
+          <>
+            <strong style={{ fontSize: 13 }}>Presentaties aan de testpartijen</strong>
+            {rpEvents.length === 0 ? (
+              <div className="empty" style={{ padding: 12 }}>Nog geen presentaties. Vraag er een met het formulier hierboven.</div>
+            ) : (
+              <table>
+                <tbody>
+                  {[...rpEvents].reverse().map((e, i) => (
+                    <tr key={`${e.at}-${i}`}>
+                      <td className="mono" style={{ whiteSpace: 'nowrap', width: 1 }}>{new Date(e.at).toLocaleTimeString('nl-NL')}</td>
+                      <td style={{ whiteSpace: 'nowrap', width: 1, color: kindColour(e.kind), fontWeight: 600 }}>{RP_KIND_LABELS[e.kind] ?? e.kind}</td>
+                      <td style={{ fontSize: 12 }}>
+                        {describeRP(e, copyOrigin(chains, e, vctOf))}
+                        {e.key_fingerprint && <div style={{ marginTop: 4 }}><FingerprintChip fp={e.key_fingerprint} /></div>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
       </div>
     </div>
   )
+
+  // The events of a chain with the presentations of its copies, by time.
+  function timelineRows(chain: ReturnType<typeof sessionChains>[number]): { issuer?: LifecycleEvent; rp?: RPEvent }[] {
+    const rows: { at: string; issuer?: LifecycleEvent; rp?: RPEvent }[] = chain.events.map((e) => ({ at: e.at, issuer: e }))
+    for (const e of rpEvents) {
+      if (e.kind === 'presented' && originChain(copyOrigin(chains, e, vctOf)) === chain) rows.push({ at: e.at, rp: e })
+    }
+    return rows.sort((a, b) => a.at.localeCompare(b.at))
+  }
 }

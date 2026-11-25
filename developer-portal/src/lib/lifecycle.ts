@@ -182,3 +182,142 @@ export function describe(e: LifecycleEvent): string {
       return ''
   }
 }
+
+/* ── Test relying party (#737) ───────────────────────────────────────────
+   Two fictional relying parties ask a wallet for an attestation of the own
+   issuer. Each presentation names the copy by the fingerprint of its
+   holder key, so the block can put it next to the issuance it came from. */
+
+export type RPParty = { id: string; name: string; client_id: string }
+
+export type RPCredential = { id: string; name: string; vct: string; claims: string[][] }
+
+export type RPCatalog =
+  | { enabled: false }
+  | { enabled: true; parties: RPParty[]; credentials: RPCredential[]; error: string }
+
+export type RPEvent = {
+  at: string
+  kind: 'presented' | 'declined' | 'rejected' | string
+  session: string
+  relying_party: string
+  relying_party_name: string
+  configuration: string
+  vct: string
+  claims: string[]
+  key_fingerprint?: string
+  status?: string
+  error?: string
+  error_description?: string
+}
+
+export type RPRequest = { link: string; expires_at: string; session: string } | { error: string }
+
+/** Where an open request stands: a request is answered once, and expires. */
+export type RequestState = { state: 'open' } | { state: 'answered'; event: RPEvent } | { state: 'expired' }
+
+/** Where a presented copy came from: which issuance, which copy; or how
+    many issuances it could have come from, when more than one. */
+export type CopyOrigin = { chain: SessionChain; copy: number; of: number } | { ambiguous: number }
+
+const RP_MESSAGES: Record<string, string> = {
+  unknown_relying_party: 'De testpartij bestaat niet (meer).',
+  unknown_credential: 'De testpartij is niet geregistreerd voor dit attestatietype. Draai make provision-test-relying-parties opnieuw.',
+  invalid_claims: 'Kies een of meer claims, elk één keer.',
+}
+
+export function rpCatalogFrom(status: number | null, body: unknown): RPCatalog {
+  if (status === 404) return { enabled: false }
+  const answer = (body ?? {}) as { relying_parties?: unknown; credentials?: unknown }
+  if (status === 200 && Array.isArray(answer.relying_parties) && Array.isArray(answer.credentials)) {
+    return { enabled: true, error: '', parties: answer.relying_parties as RPParty[], credentials: answer.credentials as RPCredential[] }
+  }
+  return { enabled: true, parties: [], credentials: [], error: lifecycleMessage(status, body) }
+}
+
+export function rpRequestFrom(status: number | null, body: unknown): RPRequest {
+  const answer = (body ?? {}) as { link?: unknown; expires_at?: unknown; error?: unknown }
+  const session = (body as { session?: unknown } | undefined)?.session
+  if (status === 201 && typeof answer.link === 'string' && typeof answer.expires_at === 'string' && typeof session === 'string') {
+    return { link: answer.link, expires_at: answer.expires_at, session }
+  }
+  if (typeof answer.error === 'string' && RP_MESSAGES[answer.error]) return { error: RP_MESSAGES[answer.error] }
+  return { error: lifecycleMessage(status, body) }
+}
+
+export function rpEventsFrom(status: number | null, body: unknown): RPEvent[] | { error: string } {
+  const events = (body as { events?: unknown } | undefined)?.events
+  if (status === 200 && Array.isArray(events)) return events as RPEvent[]
+  return { error: lifecycleMessage(status, body) }
+}
+
+/** The issuance a presented copy came from: one of the same attestation
+    type (VCT), issued before the presentation, with the copy's key
+    fingerprint. The relying party verifies the VCT, not the configuration:
+    two configurations of one type (two tax years) both answer a request
+    for either. vctOf gives the VCT of an issuer configuration; without
+    one, the configurations must be equal. A wallet may use a key again in a
+    later issuance, so more than one candidate is ambiguous, not a guess. */
+export function copyOrigin(
+  chains: SessionChain[],
+  presented: Pick<RPEvent, 'key_fingerprint' | 'configuration' | 'vct' | 'at'>,
+  vctOf: (configuration: string) => string | undefined = () => undefined,
+): CopyOrigin | null {
+  const fp = presented.key_fingerprint
+  if (!fp) return null
+  const sameType = (configuration: string | undefined) => {
+    const vct = configuration ? vctOf(configuration) : undefined
+    return vct !== undefined ? vct === presented.vct : configuration === presented.configuration
+  }
+  const found: { chain: SessionChain; copy: number; of: number }[] = []
+  for (const chain of chains) {
+    for (const e of chain.events) {
+      const i = (e.key_fingerprints ?? []).indexOf(fp)
+      if (e.kind === 'credential_issued' && i >= 0 && sameType(e.configuration) && e.at <= presented.at) {
+        found.push({ chain, copy: i + 1, of: e.key_fingerprints!.length })
+      }
+    }
+  }
+  if (found.length > 1) return { ambiguous: found.length }
+  return found[0] ?? null
+}
+
+/** The chain a presentation belongs under, if it has exactly one origin. */
+export function originChain(origin: CopyOrigin | null): SessionChain | null {
+  return origin && 'chain' in origin ? origin.chain : null
+}
+
+const STATUS_LABELS: Record<string, string> = { valid: 'geldig', revoked: 'ingetrokken', expired: 'verlopen' }
+
+/** What a presentation event says, in one line. */
+export function describeRP(e: RPEvent, origin: CopyOrigin | null): string {
+  const what = `${e.configuration} (${e.claims.join(', ')})`
+  switch (e.kind) {
+    case 'presented':
+      return [`getoond aan ${e.relying_party_name}: ${what}`,
+        !origin ? 'uitgifte niet in de tijdlijn'
+          : 'ambiguous' in origin ? `exemplaar in ${origin.ambiguous} uitgiftes, niet eenduidig`
+            : `exemplaar ${origin.copy} van ${origin.of}`,
+        STATUS_LABELS[e.status ?? ''] ?? e.status].filter(Boolean).join(' · ')
+    case 'declined':
+      return `geweigerd door de wallet voor ${e.relying_party_name}: ${what}${e.error ? ` (${e.error})` : ''}`
+    case 'rejected':
+      return `afgewezen door ${e.relying_party_name}: ${e.error_description ?? e.error ?? ''}`
+    default:
+      return ''
+  }
+}
+
+/** Whether a request was answered (its event is in the timeline) or has
+    expired; the form then takes its link away. */
+export function requestState(req: { session: string; expires_at: string }, events: RPEvent[], now: Date): RequestState {
+  const event = events.find((e) => e.session === req.session)
+  if (event) return { state: 'answered', event }
+  if (now.getTime() >= new Date(req.expires_at).getTime()) return { state: 'expired' }
+  return { state: 'open' }
+}
+
+/** The claim paths as the form shows them. */
+export function claimLabel(path: string[]): string {
+  return path.join('.')
+}

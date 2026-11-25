@@ -26,6 +26,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   The demo keeps those of the last 50 minutes in a schema of its own
   (`ISSUER_DEMO_DATABASE_SCHEMA`) and serves them at `/demo/events` on the
   internal API; without the port the core records nothing.
+- **Presentations in the credential lifecycle block** (#737): with
+  `TEST_RP_INTERNAL_URL` set, the block has a form to ask a wallet for a
+  presentation: relying party, attestation type and claims, as a QR code and
+  a link for the same device. A presented copy appears in the timeline under
+  the issuance it came from ("exemplaar 2 van 3"), with the same fingerprint,
+  and a list shows every presentation, refusal and rejection. A copy whose
+  key is in more than one issuance of the type before the presentation is
+  shown as ambiguous. Once a request is answered or expired, the form takes
+  its link away. The form and the list need only `TEST_RP_INTERNAL_URL`; the
+  link to issuances also needs `CREDENTIAL_ISSUER_INTERNAL_URL`. The portal
+  backend passes the calls on under `/test-rp/`.
 - **Test relying party** (#737): `services/test-relying-party` asks a
   wallet for an attestation of the own credential issuer over OpenID4VP on
   behalf of two fictional relying parties, for an attestation type and

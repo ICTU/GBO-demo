@@ -88,3 +88,29 @@ func passOn(w http.ResponseWriter, r *http.Request, client *http.Client, target 
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(answer)
 }
+
+// ── Test relying party (#737) ──────────────────────────────────────────────
+//
+//	GET  /test-rp/catalog        → the relying parties, attestation types and claims
+//	POST /test-rp/presentations  {relying_party, credential, claims} → 201 {link, request_uri, session, expires_at}
+//	GET  /test-rp/events         → what wallets presented, declined or failed to present, of the last 50 minutes
+//
+// Passed on to the internal API of test-relying-party as they are. Without
+// TEST_RP_INTERNAL_URL none of these exist, so the block hides its form.
+
+func registerTestRP(mux *http.ServeMux, internalURL string) {
+	if internalURL == "" {
+		return
+	}
+	base := strings.TrimRight(internalURL, "/")
+	client := &http.Client{Timeout: 10 * time.Second}
+	for route, target := range map[string]string{
+		"GET /test-rp/catalog":        "/catalog",
+		"POST /test-rp/presentations": "/presentations",
+		"GET /test-rp/events":         "/events",
+	} {
+		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
+			passOn(w, r, client, base+target)
+		})
+	}
+}

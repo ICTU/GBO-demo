@@ -1857,6 +1857,11 @@ services:
       # settings, whose internal API is otherwise published on 127.0.0.1
       # only.
       - CREDENTIAL_ISSUER_INTERNAL_URL=${CREDENTIAL_ISSUER_INTERNAL_URL:-}
+      # The test relying party of the lifecycle block (#737); off unless
+      # TEST_RP_INTERNAL_URL is set in .env, for the same reason. Alone it
+      # gives the presentation form and its list; placing a presented copy
+      # under its issuance needs CREDENTIAL_ISSUER_INTERNAL_URL too.
+      - TEST_RP_INTERNAL_URL=${TEST_RP_INTERNAL_URL:-}
       - CREDENTIAL_ISSUER_STATUS_URL=http://eudi-credential-issuer:8080
       - EUDI_OFFERS_URL=http://eudi-adapter:4009/eudi-offers.json
       - FSC_TXLOG_BD_URL=https://bd-txlog-api:9443

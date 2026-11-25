@@ -81,9 +81,106 @@ test('C1: an issuance says how many copies, keys and which batch size, and where
   )
 })
 
+test('#737: a backend without the test relying party hides its form', async () => {
+  const { rpCatalogFrom } = await import('../src/lib/lifecycle.ts')
+  assert.deepEqual(rpCatalogFrom(404, {}), { enabled: false })
+  const body = { relying_parties: [{ id: 'a', name: 'GBO testpartij A', client_id: 'x509_hash:x' }], credentials: [] }
+  assert.deepEqual(rpCatalogFrom(200, body), { enabled: true, error: '', parties: body.relying_parties, credentials: [] })
+})
+
+test('#737 D1: a request gives a link; a refusal says why', async () => {
+  const { rpRequestFrom } = await import('../src/lib/lifecycle.ts')
+  assert.deepEqual(rpRequestFrom(201, { link: 'openid4vp://?x', expires_at: at(5), session: 'r1' }), { link: 'openid4vp://?x', expires_at: at(5), session: 'r1' })
+  assert.deepEqual(rpRequestFrom(400, { error: 'invalid_claims' }), { error: 'Kies een of meer claims, elk één keer.' })
+})
+
+test('#737 D2/D3: a presented copy is found in the issuance it came from', async () => {
+  const { copyOrigin, describeRP, sessionChains } = await import('../src/lib/lifecycle.ts')
+  const chains = sessionChains([
+    event(0, 'session_started', 'a'),
+    event(1, 'credential_issued', 'a', { configuration: 'test-pid-pid', key_fingerprints: ['fp1', 'fp2', 'fp3'] }),
+  ])
+  const presented = {
+    at: at(5), kind: 'presented', session: 'r1', relying_party: 'b', relying_party_name: 'GBO testpartij B',
+    configuration: 'test-pid-pid', vct: 'urn:eudi:pid:nl:1', claims: ['birthdate'], key_fingerprint: 'fp2', status: 'valid',
+  }
+  const origin = copyOrigin(chains, presented)
+  assert.ok(origin && 'chain' in origin)
+  assert.equal(origin.copy, 2)
+  assert.equal(origin.of, 3)
+  assert.equal(describeRP(presented, origin), 'getoond aan GBO testpartij B: test-pid-pid (birthdate) · exemplaar 2 van 3 · geldig')
+  assert.equal(copyOrigin(chains, { ...presented, key_fingerprint: 'unknown' }), null)
+  assert.equal(describeRP({ ...presented, status: 'revoked', key_fingerprint: 'x' }, null),
+    'getoond aan GBO testpartij B: test-pid-pid (birthdate) · uitgifte niet in de tijdlijn · ingetrokken')
+})
+
+test('#737 D5/D8: declined and rejected presentations', async () => {
+  const { describeRP } = await import('../src/lib/lifecycle.ts')
+  const base = { at: at(1), session: 'r1', relying_party: 'a', relying_party_name: 'GBO testpartij A', configuration: 'test-pid-pid', vct: 'v', claims: ['birthdate'] }
+  assert.equal(describeRP({ ...base, kind: 'declined', error: 'access_denied' }, null), 'geweigerd door de wallet voor GBO testpartij A: test-pid-pid (birthdate) (access_denied)')
+  assert.equal(describeRP({ ...base, kind: 'rejected', error: 'invalid_presentation', error_description: 'oid4vp: nonce mismatch' }, null), 'afgewezen door GBO testpartij A: oid4vp: nonce mismatch')
+})
+
+test('#737: an answered request loses its link; so does an expired one', async () => {
+  const { requestState } = await import('../src/lib/lifecycle.ts')
+  const req = { session: 'r1', expires_at: at(5) }
+  const presented = { at: at(2), kind: 'presented', session: 'r1', relying_party: 'a', relying_party_name: 'GBO testpartij A',
+    configuration: 'test-pid-pid', vct: 'v', claims: ['birthdate'], key_fingerprint: 'fp', status: 'valid' }
+  assert.deepEqual(requestState(req, [], new Date(at(1))), { state: 'open' })
+  assert.deepEqual(requestState(req, [{ ...presented, session: 'other' }], new Date(at(1))), { state: 'open' })
+  assert.deepEqual(requestState(req, [presented], new Date(at(3))), { state: 'answered', event: presented })
+  assert.deepEqual(requestState(req, [], new Date(at(5))), { state: 'expired' })
+})
+
 test('a refused refresh says why, in the session it would continue', () => {
   assert.equal(
     describe(event(0, 'token_refused', 'a', { grant_type: 'refresh_token', error: 'invalid_grant', error_description: 'the deferral has expired' })),
     'refresh token · invalid_grant: the deferral has expired',
   )
+})
+
+test('#737 review: a copy is matched by fingerprint, type and time; two candidates are ambiguous', async () => {
+  const { copyOrigin, describeRP, sessionChains } = await import('../src/lib/lifecycle.ts')
+  const chains = sessionChains([
+    event(0, 'credential_issued', 'old', { configuration: 'test-pid-pid', key_fingerprints: ['k1', 'k2'] }),
+    event(10, 'credential_issued', 'new', { configuration: 'test-pid-pid', key_fingerprints: ['k3', 'k1'] }),
+    event(12, 'credential_issued', 'other', { configuration: 'income', key_fingerprints: ['k1'] }),
+  ])
+  const presented = (minute: number, fp: string, configuration = 'test-pid-pid') => ({
+    at: at(minute), kind: 'presented', session: 'r', relying_party: 'a', relying_party_name: 'GBO testpartij A',
+    configuration, vct: 'v', claims: ['bsn'], key_fingerprint: fp, status: 'valid',
+  })
+  // Before the newer issuance only the older one can be the origin.
+  const early = copyOrigin(chains, presented(5, 'k1'))
+  assert.ok(early && 'chain' in early && early.chain.sessions[0] === 'old' && early.copy === 1)
+  // After both, the same key is in two issuances of the type: ambiguous.
+  assert.deepEqual(copyOrigin(chains, presented(15, 'k1')), { ambiguous: 2 })
+  assert.equal(describeRP(presented(15, 'k1'), { ambiguous: 2 }),
+    'getoond aan GBO testpartij A: test-pid-pid (bsn) · exemplaar in 2 uitgiftes, niet eenduidig · geldig')
+  // Another type with the same key does not count.
+  const income = copyOrigin(chains, presented(15, 'k1', 'income'))
+  assert.ok(income && 'chain' in income && income.chain.sessions[0] === 'other')
+  // A presentation before any issuance of it has no origin.
+  assert.equal(copyOrigin(chains, presented(-1, 'k1')), null)
+})
+
+test('#737 review: a copy is matched by the verified VCT, across configurations of one type', async () => {
+  const { copyOrigin, sessionChains } = await import('../src/lib/lifecycle.ts')
+  const vctOf = (configuration: string) =>
+    ({ 'income-2024': 'urn:income', 'income-2025': 'urn:income', pid: 'urn:pid' } as Record<string, string>)[configuration]
+  const chains = sessionChains([
+    event(0, 'credential_issued', 's25', { configuration: 'income-2025', key_fingerprints: ['k1'] }),
+    event(1, 'credential_issued', 'spid', { configuration: 'pid', key_fingerprints: ['k2'] }),
+  ])
+  const presented = (minute: number, fp: string, configuration: string, vct: string) => ({
+    at: at(minute), kind: 'presented', session: 'r', relying_party: 'a', relying_party_name: 'GBO testpartij A',
+    configuration, vct, claims: ['jaar'], key_fingerprint: fp, status: 'valid',
+  })
+  // Asked as 2024, presented the 2025 statement: the same VCT, so the same copy.
+  const origin = copyOrigin(chains, presented(5, 'k1', 'income-2024', 'urn:income'), vctOf)
+  assert.ok(origin && 'chain' in origin && origin.chain.sessions[0] === 's25' && origin.copy === 1)
+  // A key of another type does not match.
+  assert.equal(copyOrigin(chains, presented(5, 'k2', 'income-2024', 'urn:income'), vctOf), null)
+  // Before the issuance there is no origin.
+  assert.equal(copyOrigin(chains, presented(-1, 'k1', 'income-2024', 'urn:income'), vctOf), null)
 })
