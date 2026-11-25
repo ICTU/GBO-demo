@@ -170,8 +170,12 @@ func runWalletRegistrationCommand(ctx context.Context, arguments []string, stdou
 		if err != nil {
 			return true, err
 		}
-		if err := provisionTestRelyingParties(options); err != nil {
+		skipped, err := provisionTestRelyingParties(options)
+		if err != nil {
 			return true, fmt.Errorf("provision test relying parties: %w", err)
+		}
+		if len(skipped) > 0 {
+			_, _ = fmt.Fprintf(stdout, "skipped providers the issuer does not have: %s\n", strings.Join(skipped, ", "))
 		}
 		_, _ = fmt.Fprintf(stdout, "-> test-relying-party configuration in %s; this command is for local development only\n", filepath.Join(options.secretsDir, testRPDir))
 		return true, nil
