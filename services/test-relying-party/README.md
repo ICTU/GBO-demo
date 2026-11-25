@@ -53,7 +53,9 @@ Service_Provider) for every attestation type of the issuer's `eudi`
 profile with all its claims, read from the running issuer's metadata, and
 copies the issuer CAs the service trusts. The wallet trusts the parties
 through the CA anchors on the WRPAC and WRPRC trust lists; no wallet build
-is needed. Run it again after a new attestation type.
+is needed. Run it again after a new attestation type. Without `--providers`
+it skips a provider the issuer does not have, such as the test PID when it
+is not provisioned; a list given with `--providers` must be complete.
 
 | Variable | |
 |---|---|
