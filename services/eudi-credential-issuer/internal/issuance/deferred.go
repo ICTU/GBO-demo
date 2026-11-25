@@ -185,8 +185,19 @@ func (s *Service) takeDeferral(ctx context.Context, session Session, transaction
 
 // Deferred handles a deferred credential request: it asks the source again.
 // Unavailable: 202 with the same transaction_id. No data: the transaction
-// ends with credential_request_denied (V5). Data: the credential.
+// ends with credential_request_denied (V5). Data: the credential. The
+// outcome goes to the session's timeline, as for Credential.
 func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialResult, error) {
+	var ev Event
+	res, err := s.deferred(ctx, call, &ev)
+	if ev.Session != "" {
+		s.recordCredential(ctx, ev, res, err)
+	}
+	return res, err
+}
+
+// deferred is Deferred; it fills ev with what the request turns out to be.
+func (s *Service) deferred(ctx context.Context, call DeferredCall, ev *Event) (CredentialResult, error) {
 	prov, p, err := s.resolve(call.Target)
 	if err != nil {
 		return CredentialResult{}, err
@@ -199,6 +210,7 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 	if err != nil {
 		return CredentialResult{}, err
 	}
+	*ev = Event{Provider: prov.Name, Profile: p.Name, Session: sessionLabel(session.ID)}
 	accessToken := strings.TrimSpace(call.Authorization[len("DPoP"):])
 	proof, err := dpop.Verify(call.DPoP, dpop.Expected{Method: "POST", URL: s.Identifier(call.Target) + "/deferred_credential", AccessToken: accessToken}, now)
 	if err != nil {
@@ -222,6 +234,18 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 	d, keep, err := s.takeDeferral(ctx, session, req.TransactionID, now)
 	if err != nil {
 		return CredentialResult{}, err
+	}
+	keys := make([]jose.JSONWebKey, len(d.Keys))
+	for i, raw := range d.Keys {
+		if err := keys[i].UnmarshalJSON(raw); err != nil {
+			return CredentialResult{}, errors.Join(err, keep())
+		}
+	}
+	// The batch size was checked at the credential request; the copies are
+	// the keys the wallet gave then.
+	ev.Configuration, ev.KeysOffered = d.ConfigurationID, len(keys)
+	for _, k := range keys {
+		ev.KeyFingerprints = append(ev.KeyFingerprints, KeyFingerprint(k))
 	}
 	bsn, err := openSubject(prov, d.Subject)
 	if err != nil {
@@ -255,12 +279,6 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 	notBefore, expires := validity(now, c.ValidDays, session.Reference)
 	doc := Document{CredentialID: d.CredentialID, ConfigurationID: d.ConfigurationID, Claims: fetched[0].Attributes,
 		NotBefore: notBefore, Expires: expires}
-	keys := make([]jose.JSONWebKey, len(d.Keys))
-	for i, raw := range d.Keys {
-		if err := keys[i].UnmarshalJSON(raw); err != nil {
-			return CredentialResult{}, err
-		}
-	}
 	out, err := s.issueOnce(ctx, prov, p, c, session, doc, p.toNLWallet(token.WalletProvider), keys, encrypter, now)
 	if err != nil {
 		return CredentialResult{}, err

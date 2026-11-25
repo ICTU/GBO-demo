@@ -190,6 +190,9 @@ type Config struct {
 	// Settings supply the batch settings in force; without them,
 	// ConfiguredSettings.
 	Settings Settings
+	// Events takes the events of the wallet sessions; without it nothing
+	// is recorded.
+	Events   Events
 	OfferTTL time.Duration
 	TokenTTL time.Duration
 	NonceTTL time.Duration

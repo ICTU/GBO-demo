@@ -100,12 +100,12 @@ func (s *Service) reusePolicy(p Profile, c CredentialConfiguration, toNLWallet b
 	return s.cfg.Settings.ReusePolicy(c.ID)
 }
 
-// batchSize is the batch size in force for c on p: that of its reuse
-// policy, if the wallet is told about one (ETSI TS 119 472-3 clause
-// 4.2.4.2-14), the provider's otherwise.
-func (s *Service) batchSize(p Profile, c CredentialConfiguration, toNLWallet bool) int {
+// batchSize is the batch size in force for c on p, and where it comes
+// from: its reuse policy, if the wallet is told about one (ETSI TS 119
+// 472-3 clause 4.2.4.2-14), the provider otherwise.
+func (s *Service) batchSize(p Profile, c CredentialConfiguration, toNLWallet bool) (int, string) {
 	if policy, ok := s.reusePolicy(p, c, toNLWallet); ok {
-		return policy.BatchSize
+		return policy.BatchSize, BatchSizeFromReusePolicy
 	}
-	return s.cfg.Settings.BatchSize(c.Provider)
+	return s.cfg.Settings.BatchSize(c.Provider), BatchSizeFromProvider
 }

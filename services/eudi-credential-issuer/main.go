@@ -114,10 +114,22 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	}
 	selectors := configureTestPersonLogins(&cfg, loaded.TestPersonLogins, st, time.Now)
 	// Demo shortcut: the developer portal changes the batch settings at
-	// runtime, in memory. A real deployment keeps the configured settings
+	// runtime, in memory, and shows the events of the wallet sessions. A
+	// real deployment keeps the configured settings, records no timeline
 	// and leaves democontrol out.
 	overrides := democontrol.NewOverrides(cfg, issuance.ConfiguredSettings(cfg))
 	cfg.Settings = overrides
+	var timelineStore democontrol.EventStore = &democontrol.MemoryEvents{}
+	if os.Getenv("ISSUER_STORE") != "memory" {
+		pe, err := democontrol.OpenPostgresEvents(ctx, os.Getenv("ISSUER_DATABASE_URL"), env("ISSUER_DEMO_DATABASE_SCHEMA", defaultSchema+"_demo"))
+		if err != nil {
+			return fmt.Errorf("timeline: %w", err)
+		}
+		defer pe.Close()
+		timelineStore = pe
+	}
+	timeline := democontrol.NewEventLog(timelineStore, time.Now, log)
+	cfg.Events = timeline
 	svc, err := issuance.New(cfg, src, st, st, st, time.Now)
 	if err != nil {
 		return err
@@ -130,7 +142,7 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	}
 	internalMux := http.NewServeMux()
 	internalMux.Handle("/", httpapi.Internal(svc, log))
-	internalMux.Handle("/demo/", democontrol.Handler(overrides))
+	internalMux.Handle("/demo/", democontrol.Handler(overrides, timeline))
 	public := &http.Server{Addr: env("ISSUER_LISTEN_ADDR", ":8080"), Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	internal := &http.Server{Addr: env("ISSUER_INTERNAL_ADDR", ":8081"), Handler: internalMux, ReadHeaderTimeout: 10 * time.Second}
 	errs := make(chan error, 2)

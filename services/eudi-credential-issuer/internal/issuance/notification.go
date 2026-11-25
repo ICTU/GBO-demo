@@ -57,5 +57,7 @@ func (s *Service) Notify(ctx context.Context, call NotificationCall) error {
 	} else if !ok {
 		return refuse(oid4vci.ErrInvalidNotificationID, "the notification_id is unknown, used or of another issuance")
 	}
+	s.record(ctx, Event{Kind: EventNotificationReceived, Provider: call.Target.Provider, Profile: p.Name,
+		Session: sessionLabel(session.ID), Notification: n.Event})
 	return nil
 }

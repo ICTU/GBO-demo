@@ -121,7 +121,22 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the offer has been revoked")
 	}
 
-	return s.grant(ctx, req.Target, p, session, att, proof.JKT, now, nil, "")
+	resp, err := s.grant(ctx, req.Target, p, session, att, proof.JKT, now, nil, "")
+	if err == nil {
+		s.recordToken(ctx, req, p, session.ID, "", att)
+	}
+	return resp, err
+}
+
+// recordToken records a token issued in session; previous is the session a
+// refresh continues, if it is another.
+func (s *Service) recordToken(ctx context.Context, req TokenRequest, p Profile, session, previous string, att clientattest.Verified) {
+	e := Event{Kind: EventTokenIssued, Provider: req.Target.Provider, Profile: p.Name, Session: sessionLabel(session),
+		GrantType: req.GrantType, WalletProvider: att.Anchor}
+	if previous != "" {
+		e.PreviousSession = sessionLabel(previous)
+	}
+	s.record(ctx, e)
 }
 
 // grantCode checks the parameters of the request's grant on profile p and
@@ -258,7 +273,11 @@ func (s *Service) refresh(ctx context.Context, req TokenRequest, att clientattes
 		if !old.Pending.Until.IsZero() && !now.Before(old.Pending.Until) {
 			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the deferral has expired")
 		}
-		return s.grant(ctx, req.Target, p, old, att, jkt, now, &rec, req.RefreshToken)
+		resp, err := s.grant(ctx, req.Target, p, old, att, jkt, now, &rec, req.RefreshToken)
+		if err == nil {
+			s.recordToken(ctx, req, p, old.ID, "", att)
+		}
+		return resp, err
 	}
 	// A session of its own: the credentials of the first issuance stay
 	// issued, these are new. Its code is random and handed to nobody.
@@ -280,7 +299,11 @@ func (s *Service) refresh(ctx context.Context, req TokenRequest, att clientattes
 	if err := s.sessions.CreateSession(ctx, next); err != nil {
 		return oid4vci.TokenResponse{}, err
 	}
-	return s.grant(ctx, req.Target, p, next, att, jkt, now, &rec, req.RefreshToken)
+	resp, err := s.grant(ctx, req.Target, p, next, att, jkt, now, &rec, req.RefreshToken)
+	if err == nil {
+		s.recordToken(ctx, req, p, next.ID, old.ID, att)
+	}
+	return resp, err
 }
 
 // authenticateWallet checks the Wallet Instance Attestation and its PoP,

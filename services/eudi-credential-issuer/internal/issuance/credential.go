@@ -64,6 +64,18 @@ type CredentialResult struct {
 // proofs; for KindEUDI from the key attestation they carry, as HAIP and ARF
 // ISSU_30 require.
 func (s *Service) Credential(ctx context.Context, call CredentialCall) (CredentialResult, error) {
+	var ev Event
+	res, err := s.credential(ctx, call, &ev)
+	// A request without a session of this issuer is nobody's to show.
+	if ev.Session != "" {
+		s.recordCredential(ctx, ev, res, err)
+	}
+	return res, err
+}
+
+// credential is Credential; it fills ev with what the request turns out to
+// be, as far as it gets.
+func (s *Service) credential(ctx context.Context, call CredentialCall, ev *Event) (CredentialResult, error) {
 	prov, p, err := s.resolve(call.Target)
 	if err != nil {
 		return CredentialResult{}, err
@@ -75,6 +87,7 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (Credenti
 	if err != nil {
 		return CredentialResult{}, err
 	}
+	*ev = Event{Provider: prov.Name, Profile: p.Name, Session: sessionLabel(session.ID)}
 	accessToken := strings.TrimSpace(call.Authorization[len("DPoP"):])
 	proof, err := dpop.Verify(call.DPoP, dpop.Expected{Method: "POST", URL: id + "/credential", AccessToken: accessToken}, now)
 	if err != nil {
@@ -111,8 +124,14 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (Credenti
 	if !ok || c.Provider != prov.Name {
 		return CredentialResult{}, refuse(oid4vci.ErrUnknownCredentialID, "the credential configuration is no longer offered")
 	}
+	ev.Configuration = c.ID
 	toNLWallet := p.toNLWallet(token.WalletProvider)
-	keys, err := s.holderKeys(ctx, p, p.requiresKeyAttestation(token.WalletProvider), id, req.Proofs, s.batchSize(p, c, toNLWallet))
+	ev.BatchSize, ev.BatchSizeFrom = s.batchSize(p, c, toNLWallet)
+	keys, proofType, err := s.holderKeys(ctx, p, p.requiresKeyAttestation(token.WalletProvider), id, req.Proofs, ev.BatchSize)
+	ev.ProofType, ev.KeysOffered = proofType, len(keys)
+	for _, k := range keys {
+		ev.KeyFingerprints = append(ev.KeyFingerprints, KeyFingerprint(k))
+	}
 	if err != nil {
 		return CredentialResult{}, err
 	}
@@ -298,38 +317,40 @@ func (s *Service) authorize(ctx context.Context, t Target, header, scheme string
 }
 
 // holderKeys verifies the key proofs and returns the keys to bind the
-// credentials to, at most batchSize. All proofs must carry the same
-// c_nonce, which is used up.
-func (s *Service) holderKeys(ctx context.Context, p Profile, mustAttest bool, id string, proofs *oid4vci.Proofs, batchSize int) ([]jose.JSONWebKey, error) {
+// credentials to, at most batchSize, and the proof type. All proofs must
+// carry the same c_nonce, which is used up. More keys than batchSize are
+// refused, and returned with the refusal for the timeline.
+func (s *Service) holderKeys(ctx context.Context, p Profile, mustAttest bool, id string, proofs *oid4vci.Proofs, batchSize int) (keys []jose.JSONWebKey, pt string, err error) {
 	if proofs == nil || (len(proofs.JWT) == 0) == (len(proofs.Attestation) == 0) {
-		return nil, refuse(oid4vci.ErrInvalidProof, "proofs must contain jwt or attestation proofs")
+		return nil, "", refuse(oid4vci.ErrInvalidProof, "proofs must contain jwt or attestation proofs")
 	}
 	now := s.now()
-	var keys []jose.JSONWebKey
 	var nonces []string
 
 	switch {
 	case len(proofs.Attestation) > 0:
+		pt = ProofTypeAttestation
 		if !p.servesEUDI() {
-			return nil, refuse(oid4vci.ErrInvalidProof, "the attestation proof type is not supported for this profile")
+			return nil, pt, refuse(oid4vci.ErrInvalidProof, "the attestation proof type is not supported for this profile")
 		}
 		if len(proofs.Attestation) != 1 {
-			return nil, refuse(oid4vci.ErrInvalidProof, "exactly one attestation proof is expected")
+			return nil, pt, refuse(oid4vci.ErrInvalidProof, "exactly one attestation proof is expected")
 		}
 		ka, err := keyattest.Verify(proofs.Attestation[0], p.KeyAttestationProviders, now, false)
 		if err != nil {
-			return nil, refuse(oid4vci.ErrInvalidProof, err.Error())
+			return nil, pt, refuse(oid4vci.ErrInvalidProof, err.Error())
 		}
 		if err := checkLevels(p, ka); err != nil {
-			return nil, err
+			return nil, pt, err
 		}
 		keys = ka.Keys
 		nonces = append(nonces, ka.Nonce)
 	default:
+		pt = ProofTypeJWT
 		for _, raw := range proofs.JWT {
 			jp, err := oid4vci.VerifyJWTProof(raw, id, now)
 			if err != nil {
-				return nil, refuse(oid4vci.ErrInvalidProof, err.Error())
+				return nil, pt, refuse(oid4vci.ErrInvalidProof, err.Error())
 			}
 			nonces = append(nonces, jp.Nonce)
 			// A wallet that need not attest its keys may still do so where
@@ -338,54 +359,54 @@ func (s *Service) holderKeys(ctx context.Context, p Profile, mustAttest bool, id
 				// One credential per proof: two proofs with one key would
 				// silently yield fewer credentials than proofs.
 				if containsKey(keys, jp.Key) {
-					return nil, refuse(oid4vci.ErrInvalidProof, "two proofs use the same key")
+					return nil, pt, refuse(oid4vci.ErrInvalidProof, "two proofs use the same key")
 				}
 				keys = append(keys, jp.Key)
 				continue
 			}
 			// HAIP and the ARF: the proof key must be attested, and every
 			// attested key gets a credential.
+			pt = ProofTypeJWTKeyAttestation
 			if jp.KeyAttestation == "" {
-				return nil, refuse(oid4vci.ErrInvalidProof, "a key attestation is required")
+				return nil, pt, refuse(oid4vci.ErrInvalidProof, "a key attestation is required")
 			}
 			ka, err := keyattest.Verify(jp.KeyAttestation, p.KeyAttestationProviders, now, true)
 			if err != nil {
-				return nil, refuse(oid4vci.ErrInvalidProof, err.Error())
+				return nil, pt, refuse(oid4vci.ErrInvalidProof, err.Error())
 			}
 			if err := checkLevels(p, ka); err != nil {
-				return nil, err
+				return nil, pt, err
 			}
 			if !containsKey(ka.Keys, jp.Key) {
-				return nil, refuse(oid4vci.ErrInvalidProof, "the proof is not signed by an attested key")
+				return nil, pt, refuse(oid4vci.ErrInvalidProof, "the proof is not signed by an attested key")
 			}
 			if ka.Nonce != jp.Nonce {
-				return nil, refuse(oid4vci.ErrInvalidProof, "the key attestation carries another nonce than the proof")
+				return nil, pt, refuse(oid4vci.ErrInvalidProof, "the key attestation carries another nonce than the proof")
 			}
 			keys = append(keys, ka.Keys...)
 		}
 	}
 
-	keys, err := distinct(keys)
-	if err != nil {
-		return nil, err
+	if keys, err = distinct(keys); err != nil {
+		return nil, pt, err
 	}
 	// More keys than the batch size are refused rather than capped; which
 	// of the two is an open question in the technical design.
 	if len(keys) > batchSize {
-		return nil, refuse(oid4vci.ErrInvalidProof, fmt.Sprintf("at most %d keys per request", batchSize))
+		return keys, pt, refuse(oid4vci.ErrInvalidProof, fmt.Sprintf("at most %d keys per request", batchSize))
 	}
 	for _, n := range nonces {
 		// A proof without c_nonce is an invalid proof (section 8.3.1.2).
 		if n == "" || n != nonces[0] {
-			return nil, refuse(oid4vci.ErrInvalidProof, "every proof must carry the same c_nonce")
+			return nil, pt, refuse(oid4vci.ErrInvalidProof, "every proof must carry the same c_nonce")
 		}
 	}
 	if ok, err := s.onetime.Take(ctx, scoped(kindNonce, id), nonces[0], now); err != nil {
-		return nil, err
+		return nil, pt, err
 	} else if !ok {
-		return nil, refuse(oid4vci.ErrInvalidNonce, "the c_nonce is unknown, expired or used")
+		return nil, pt, refuse(oid4vci.ErrInvalidNonce, "the c_nonce is unknown, expired or used")
 	}
-	return keys, nil
+	return keys, pt, nil
 }
 
 // distinct removes repeated keys: a key attested in more than one key

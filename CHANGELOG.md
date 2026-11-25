@@ -17,6 +17,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   settings through a `Settings` port; the configured settings are the
   default. The demo changes them at runtime through `/demo/settings` on the
   internal API (`internal/democontrol`), in memory.
+- **Timeline of the wallet sessions in the own credential issuer** (#745):
+  the core hands events to an `Events` port: session started, token issued
+  (grant, wallet provider), credential issued, deferred or refused (proof
+  type, keys offered, batch size and where it comes from, a shortened key
+  fingerprint per copy) and notification. A refresh names the session it
+  continues. Events hold no attribute values, codes, tokens or holder keys.
+  The demo keeps those of the last 50 minutes in a schema of its own
+  (`ISSUER_DEMO_DATABASE_SCHEMA`) and serves them at `/demo/events` on the
+  internal API; without the port the core records nothing.
 - **Consent flow with a pushed authorization request** (#427, #648): a
   service provider pushes its consent request to the consent portal over FSC
   (RFC 9126), the citizen decides in the toestemmingsportaal, and the

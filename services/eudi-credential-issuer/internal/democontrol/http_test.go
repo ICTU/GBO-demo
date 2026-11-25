@@ -2,10 +2,12 @@ package democontrol_test
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"gbo-demo/eudi-credential-issuer/internal/democontrol"
 	"gbo-demo/eudi-credential-issuer/internal/issuance"
@@ -162,5 +164,5 @@ func TestInvalidSettingsAreRefused(t *testing.T) {
 }
 
 func handler(o *democontrol.Overrides) http.Handler {
-	return democontrol.Handler(o)
+	return democontrol.Handler(o, democontrol.NewEventLog(&democontrol.MemoryEvents{}, time.Now, slog.Default()))
 }

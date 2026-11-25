@@ -22,11 +22,22 @@ func fromPolicy(p issuance.ReusePolicy) *reusePolicy {
 // maxBody limits request bodies.
 const maxBody = 1 << 16
 
-// Handler returns the settings API for the internal port, under /demo/.
-// Like the rest of the internal port it has no authentication of its own;
-// only the developer portal reaches it.
-func Handler(o *Overrides) http.Handler {
+// Handler returns the settings and timeline API for the internal port,
+// under /demo/. Like the rest of the internal port it has no
+// authentication of its own; only the developer portal reaches it.
+func Handler(o *Overrides, events *EventLog) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /demo/events", func(w http.ResponseWriter, r *http.Request) {
+		list, err := events.Events(r.Context())
+		if err != nil {
+			fail(w, http.StatusServiceUnavailable, "events_unavailable", "the timeline could not be read")
+			return
+		}
+		if list == nil {
+			list = []issuance.Event{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"events": list})
+	})
 	mux.HandleFunc("GET /demo/settings", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, o.View())
 	})
