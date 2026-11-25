@@ -1563,6 +1563,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		m.register(name, app, ownBuild,
 			func(p aspire.Resource) { app.WithParentRelationship(p) },
 			func(tags []string, order int) { app.WithTags(tags).WithDisplayOrder(order) })
+		m.setTrait(name, func(n, v string) { app.WithTrait(n, v) })
 		return app
 	}
 
@@ -1711,6 +1712,48 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		m.keepVisible[name] = true
 	}
 	m.labelAll()
+
+	// ── Networks: which organisation each resource belongs to ────────────
+	// A "network" trait per resource (dashboard: the resource's Properties),
+	// so it is clear what would run on whose network when the organisations
+	// are split into networks of their own. Grounded in the GBO Globaal
+	// Ontwerp, section 5 (every source holder runs its own access layer,
+	// policy checks and FSC Inway) and this repository's docs. Demo
+	// shortcuts, where one resource serves several organisations, get no
+	// network: fsc-postgres (all FSC peers, as on main), decryption-component
+	// (each source runs its own in reality: docs/consent-flow.md), the
+	// fsc-seed-* steps and the consent-authorization-admission check before
+	// them (each acts for two organisations). RvIG and LVG
+	// publish through the Belastingdienst FSC peer, also a demo shortcut, so
+	// that peer stays with the Belastingdienst.
+	conflicts := m.setNetworks([]network{
+		{org: "Belastingdienst", names: []string{"graphql-server", "bron-sidecar", "logboek-bd", "logboek-levering-bd"}, prefixes: []string{"bd-"}},
+		{org: "RvIG", names: []string{"logboek-brp", "logboek-levering-brp"}, prefixes: []string{"brp-"}},
+		{org: "LVG", prefixes: []string{"lvg-"}, names: []string{"logboek-lvg", "logboek-levering-lvg"}},
+		{org: "Hypotheek-BV", names: []string{"dienstverlener-backend", "dienstverlener-mock", "logboek-afnemer"}, prefixes: []string{"hv-"}},
+		{org: "Installatie Register", names: []string{"keyper-mock", "logboek-ir"}, prefixes: []string{"ir-"}},
+		{org: "GBO toestemming", names: []string{"consent-register", "logboek-toestemming", "consent-portal-backend", "toestemmingsportaal-frontend", "data-usage-index"}, prefixes: []string{"cr-"}},
+		{org: "GBO PDP", names: []string{"openftv-pdp", "policy-check", "postgres-ftv", "postgres-ftv-init", "ftv-manager-db", "ftv-adl-db",
+			"dvtp-onboarding-register", "openftv-manager", "openftv-manager-ui", "keycloak", "manager-seed"}, prefixes: []string{"pdp-"}},
+		{org: "BSNk", names: []string{"bsnk-mock"}},
+		{org: "FSC directory", prefixes: []string{"directory-"}},
+		{org: "FSC CA", names: []string{"certportal", "cfssl", "fsc-root-ca", "pki-tools-image"}},
+		{org: "EDI issuer", names: []string{"eudi-adapter", "logboek-eudi-adapter", "eudi-issuance-server", "eudi-issuance-server-image",
+			"eudi-migrations", "eudi-issuance-materialize", "postgres-eudi", "issuance-server-db", "source-registry-db",
+			"source-registry-bootstrap", "source-registry-migrations", "source-reconciler",
+			"provision-belastingdienst-certificates", "provision-rvig-certificates", "provision-demo-unsecured-certificates",
+			"eudi-credential-issuer", "credential-issuer-db", "credential-issuer-db-bootstrap", "credential-issuer-migrations",
+			"credential-issuer-materialize", "test-pid-source"}, prefixes: []string{"edi-"}},
+		{org: "Demo unsecured source", names: []string{"unsecured-graphql-server"}},
+		{org: "ASIP", names: []string{"asi-provider", "asi-authorization-server", "asi-discovery-stub", "asi-wallet-verifier",
+			"asi-wallet-verifier-image", "eudi-wallet-verifier", "eudi-wallet-verifier-runtime", "provision-asip-seal-certificate"}, prefixes: []string{"asip-"}},
+		{org: "QTSP", names: []string{"qtsp-reference", "provision-asip-qtsp-certificate", "provision-qtsp-issuance-certificates"}},
+		{org: "Integrator", names: []string{"integrator-backend"}, prefixes: []string{"int-"}},
+		{org: "GBO trust lists", names: []string{"trust-host"}},
+	})
+	if len(conflicts) > 0 {
+		log.Fatalf("resources in more than one network: %s", strings.Join(conflicts, "; "))
+	}
 
 	// ── Grouping in Docker Desktop and OrbStack ──────────────────────────
 	// Both group containers by the compose project label. Every container the

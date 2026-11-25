@@ -147,6 +147,16 @@ stay visible because they are rerun by hand: `manager-seed`,
 databases (`ftv-*-db`, `<peer>-db-*`, `source-registry-db`, ...) are
 resources of Aspire's PostgreSQL integration, nested under their server.
 
+Every resource that runs on an organisation's network carries a `network`
+trait (`WithTrait`), shown under Properties in its details: Belastingdienst,
+RvIG, LVG, Hypotheek-BV, Installatie Register, GBO toestemming, GBO PDP,
+BSNk, FSC directory, FSC CA, and with the other profiles EDI issuer, Demo
+unsecured source, ASIP, QTSP, Integrator and GBO trust lists. `apphost.go`
+lists the mapping under "Networks". Demo tooling, monitoring and the demo
+shortcuts that serve several organisations (`fsc-postgres`,
+`decryption-component`, the `fsc-seed-*` steps) have none. Unlike a tag, a
+trait cannot be filtered on in the dashboard.
+
 Filter on a tag under Filters, Tags. A resource takes its group from how it
 is added (Dockerfile, image or host process); `apphost.go` lists the
 exceptions under "Groups in the dashboard". The five `<frontend>-installer`

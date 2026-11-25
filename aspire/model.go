@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ type tracked struct {
 	nest   func(parent aspire.Resource)
 	label  func(tags []string, order int)
 	hide   func() // WithHiddenOnCompletion; nil for resources that never complete
+	trait  func(name, value string)
 	kind   kind
 	extra  []kind
 }
@@ -136,8 +138,51 @@ func (m *model) trackContainer(name string, c aspire.ContainerResource, k kind) 
 		func(p aspire.Resource) { c.WithParentRelationship(p) },
 		func(tags []string, order int) { c.WithTags(tags).WithDisplayOrder(order) })
 	m.setHide(name, func() { c.WithHiddenOnCompletion() })
+	m.setTrait(name, func(n, v string) { c.WithTrait(n, v) })
 	m.containers = append(m.containers, namedContainer{name, func(a []string) { c.WithContainerRuntimeArgs(a) }})
 	return c
+}
+
+func (m *model) setTrait(name string, trait func(name, value string)) {
+	t := m.resources[name]
+	t.trait = trait
+	m.resources[name] = t
+}
+
+// network is one organisation and the resources that run on its network.
+type network struct {
+	org      string
+	names    []string // resources by name
+	prefixes []string // resources whose name starts with one of these, such as an FSC peer's "bd-"
+}
+
+// setNetworks gives each resource that runs on an organisation's network a
+// "network" trait with that organisation (shown under Properties in the
+// dashboard). Resources that belong to no organisation (demo tooling,
+// monitoring, shared infrastructure, steps that act for two organisations)
+// get none. It returns the resources that matched more than one network.
+func (m *model) setNetworks(networks []network) []string {
+	var conflicts []string
+	for name, t := range m.resources {
+		var found []string
+		for _, n := range networks {
+			match := slices.Contains(n.names, name)
+			for _, prefix := range n.prefixes {
+				match = match || strings.HasPrefix(name, prefix)
+			}
+			if match {
+				found = append(found, n.org)
+			}
+		}
+		if len(found) > 1 {
+			conflicts = append(conflicts, name+" ("+strings.Join(found, ", ")+")")
+		}
+		if len(found) > 0 && t.trait != nil {
+			t.trait("network", found[0])
+		}
+	}
+	sort.Strings(conflicts)
+	return conflicts
 }
 
 func (m *model) setHide(name string, hide func()) {
@@ -161,6 +206,7 @@ func (m *model) postgres(name, user string, password aspire.ParameterResource, t
 	m.register(name, pg, offTheShelf,
 		func(p aspire.Resource) { pg.WithParentRelationship(p) },
 		func(tags []string, order int) { pg.WithTags(tags).WithDisplayOrder(order) })
+	m.setTrait(name, func(n, v string) { pg.WithTrait(n, v) })
 	m.containers = append(m.containers, namedContainer{name, func(a []string) { pg.WithContainerRuntimeArgs(a) }})
 	return pg
 }
@@ -172,6 +218,7 @@ func (m *model) database(server aspire.PostgresServerResource, name, databaseNam
 	m.register(name, db, offTheShelf,
 		func(p aspire.Resource) { db.WithParentRelationship(p) },
 		func(tags []string, order int) { db.WithTags(tags).WithDisplayOrder(order) })
+	m.setTrait(name, func(n, v string) { db.WithTrait(n, v) })
 	return db
 }
 
@@ -222,6 +269,7 @@ func (m *model) executable(name, command, workingDirectory string, args ...strin
 		func(p aspire.Resource) { e.WithParentRelationship(p) },
 		func(tags []string, order int) { e.WithTags(tags).WithDisplayOrder(order) })
 	m.setHide(name, func() { e.WithHiddenOnCompletion() })
+	m.setTrait(name, func(n, v string) { e.WithTrait(n, v) })
 	return e
 }
 
