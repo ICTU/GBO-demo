@@ -26,6 +26,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   The demo keeps those of the last 50 minutes in a schema of its own
   (`ISSUER_DEMO_DATABASE_SCHEMA`) and serves them at `/demo/events` on the
   internal API; without the port the core records nothing.
+- **Credential lifecycle block in the developer portal** (#745): in the EUDI
+  tab, next to the revocation block, the batch size per source and the
+  reuse policy per attestation type of the own credential issuer, with the
+  batch size an EUDI wallet is held to, and a timeline per wallet session of
+  the last 50 minutes. The portal backend passes the calls on to the
+  issuer's `/demo/` API (`/credential-lifecycle/...`) and changes nothing;
+  the issuer decides what is valid and the block shows its reason. Off by
+  default, with the revocation block: `CREDENTIAL_ISSUER_INTERNAL_URL`.
 - **Consent flow with a pushed authorization request** (#427, #648): a
   service provider pushes its consent request to the consent portal over FSC
   (RFC 9126), the citizen decides in the toestemmingsportaal, and the

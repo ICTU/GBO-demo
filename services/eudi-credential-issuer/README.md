@@ -264,6 +264,7 @@ and the pages a registration certificate names. The public port is
 container in the `eudi` network. `dev-portal-backend` joins that network
 to make test PID offers for the developer portal (`TEST_PID_OFFERS_URL`,
 empty to turn it off), and to revoke the credentials of the portal's offers
+and to change the batch settings and show the timeline
 (`CREDENTIAL_ISSUER_INTERNAL_URL`, empty to turn it off). The tunnel routes are listed in
 `docker-compose.cloudflare-tunnel.yml`. Start it with `make
 credential-issuer-up`: it checks `ISSUER_PUBLIC_URL`, `EUDI_TRUST_PUBLIC_URL`
