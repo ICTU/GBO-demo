@@ -31,9 +31,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   presentation: relying party, attestation type and claims, as a QR code and
   a link for the same device. A presented copy appears in the timeline under
   the issuance it came from ("exemplaar 2 van 3"), with the same fingerprint,
-  and a list shows every presentation, refusal and rejection. Once a request
-  is answered or expired, the form takes its link away. The portal backend
-  passes the calls on under `/test-rp/`.
+  and a list shows every presentation, refusal and rejection. A copy whose
+  key is in more than one issuance of the type before the presentation is
+  shown as ambiguous. Once a request is answered or expired, the form takes
+  its link away. The form and the list need only `TEST_RP_INTERNAL_URL`; the
+  link to issuances also needs `CREDENTIAL_ISSUER_INTERNAL_URL`. The portal
+  backend passes the calls on under `/test-rp/`.
 - **Test relying party** (#737): `services/test-relying-party` asks a
   wallet for an attestation of the own credential issuer over OpenID4VP on
   behalf of two fictional relying parties, for an attestation type and

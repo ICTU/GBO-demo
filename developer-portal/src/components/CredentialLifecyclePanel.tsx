@@ -81,17 +81,22 @@ export default function CredentialLifecyclePanel() {
   }, [])
 
   useEffect(() => {
-    void reloadSettings().then((on) => { if (on) void reloadEvents() })
+    void reloadSettings().then(() => reloadEvents())
     void loadRPCatalog().then(setRPCatalog)
   }, [reloadSettings, reloadEvents])
 
+  // The issuer's settings and timeline need CREDENTIAL_ISSUER_INTERNAL_URL;
+  // the presentation form and its list only TEST_RP_INTERNAL_URL.
+  const issuerOn = settings.enabled
+  const rpOn = rpCatalog.enabled
+
   useEffect(() => {
-    if (!settings.enabled || !live) return
+    if (!(issuerOn || rpOn) || !live) return
     const timer = window.setInterval(() => void reloadEvents(), POLL_MS)
     return () => window.clearInterval(timer)
-  }, [settings.enabled, live, reloadEvents])
+  }, [issuerOn, rpOn, live, reloadEvents])
 
-  if (!settings.enabled) return null
+  if (!issuerOn && !rpOn) return null
 
   const apply = async (key: string, label: string, change: () => Promise<string>) => {
     setBusy(key)
@@ -134,10 +139,11 @@ export default function CredentialLifecyclePanel() {
   return (
     <div className="panel">
       <div className="panel-h">
-        <span className="t">Credential lifecycle · batch size</span>
+        <span className="t">Credential lifecycle{issuerOn ? ' · batch size' : ' · presentaties'}</span>
         <button className="mini" onClick={() => void reloadSettings().then(() => reloadEvents())} style={{ marginLeft: 'auto' }}>vernieuwen</button>
       </div>
       <div className="panel-b" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {settings.enabled && (<>
         <div className="hint" style={{ fontSize: 12, color: 'var(--mute)' }}>
           Hoeveel exemplaren de eigen credential issuer per uitgifte geeft. Per bron publiceert de issuer
           <span className="mono"> batch_credential_issuance</span>; een attestatietype kan een eigen hergebruikbeleid krijgen
@@ -220,9 +226,11 @@ export default function CredentialLifecyclePanel() {
             })}
           </tbody>
         </table>
+        </>)}
 
         {rpCatalog.enabled && <TestRelyingPartyForm catalog={rpCatalog} events={rpEvents} />}
 
+        {issuerOn && (<>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <strong style={{ fontSize: 13 }}>Tijdlijn per wallet-sessie</strong>
           <span style={{ fontSize: 12, color: 'var(--mute)' }}>laatste 50 minuten · geen attribuutwaarden</span>
@@ -273,6 +281,7 @@ export default function CredentialLifecyclePanel() {
             </div>
           ))
         )}
+        </>)}
 
         {rpCatalog.enabled && (
           <>
