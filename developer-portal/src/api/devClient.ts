@@ -6,8 +6,8 @@ import {
   type AttestationOffer, type RevocationOffers, type RevokeOutcome, type StatusListView,
 } from '../lib/revocation'
 import {
-  lifecycleEventsFrom, lifecycleMessage, lifecycleSettingsFrom,
-  type LifecycleEvent, type LifecycleSettings, type ReusePolicy,
+  lifecycleEventsFrom, lifecycleMessage, lifecycleSettingsFrom, rpCatalogFrom, rpEventsFrom, rpRequestFrom,
+  type LifecycleEvent, type LifecycleSettings, type ReusePolicy, type RPCatalog, type RPEvent, type RPRequest,
 } from '../lib/lifecycle'
 
 const BASE = '/api/dev'
@@ -130,6 +130,22 @@ export async function changeLifecycleSetting(
 export async function loadLifecycleEvents(): Promise<LifecycleEvent[] | { error: string }> {
   const answer = await sendJson('GET', '/credential-lifecycle/events')
   return lifecycleEventsFrom(answer.status, answer.body)
+}
+
+export async function loadRPCatalog(): Promise<RPCatalog> {
+  const answer = await sendJson('GET', '/test-rp/catalog')
+  return rpCatalogFrom(answer.status, answer.body)
+}
+
+/** Asks the test relying party for a presentation request. */
+export async function requestPresentation(relyingParty: string, credential: string, claims: string[][]): Promise<RPRequest> {
+  const answer = await sendJson('POST', '/test-rp/presentations', { relying_party: relyingParty, credential, claims })
+  return rpRequestFrom(answer.status, answer.body)
+}
+
+export async function loadRPEvents(): Promise<RPEvent[] | { error: string }> {
+  const answer = await sendJson('GET', '/test-rp/events')
+  return rpEventsFrom(answer.status, answer.body)
 }
 
 export async function loadStatusLists(): Promise<StatusListView[] | { error: string }> {

@@ -83,3 +83,32 @@ func TestLifecycleOff(t *testing.T) {
 		t.Errorf("%d, want 404", rec.Code)
 	}
 }
+
+// The test relying party's calls are passed on as they are.
+func TestTestRPPassesOn(t *testing.T) {
+	for name, tc := range map[string]struct{ method, path, body, wantPath string }{
+		"catalog":       {http.MethodGet, "/test-rp/catalog", "", "/catalog"},
+		"presentations": {http.MethodPost, "/test-rp/presentations", `{"relying_party":"a","credential":"test-pid-pid","claims":[["birthdate"]]}`, "/presentations"},
+		"events":        {http.MethodGet, "/test-rp/events", "", "/events"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rp := &fakeIssuer{status: http.StatusCreated, answer: `{"from":"rp"}`}
+			srv := httptest.NewServer(rp)
+			defer srv.Close()
+			mux := http.NewServeMux()
+			registerTestRP(mux, srv.URL)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))
+			if rp.method != tc.method || rp.path != tc.wantPath || rp.body != tc.body || rec.Code != http.StatusCreated || rec.Body.String() != `{"from":"rp"}` {
+				t.Errorf("rp got %s %s %q; portal answered %d %s", rp.method, rp.path, rp.body, rec.Code, rec.Body.String())
+			}
+		})
+	}
+	mux := http.NewServeMux()
+	registerTestRP(mux, "")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/test-rp/catalog", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("off: %d, want 404", rec.Code)
+	}
+}

@@ -81,6 +81,56 @@ test('C1: an issuance says how many copies, keys and which batch size, and where
   )
 })
 
+test('#737: a backend without the test relying party hides its form', async () => {
+  const { rpCatalogFrom } = await import('../src/lib/lifecycle.ts')
+  assert.deepEqual(rpCatalogFrom(404, {}), { enabled: false })
+  const body = { relying_parties: [{ id: 'a', name: 'GBO testpartij A', client_id: 'x509_hash:x' }], credentials: [] }
+  assert.deepEqual(rpCatalogFrom(200, body), { enabled: true, error: '', parties: body.relying_parties, credentials: [] })
+})
+
+test('#737 D1: a request gives a link; a refusal says why', async () => {
+  const { rpRequestFrom } = await import('../src/lib/lifecycle.ts')
+  assert.deepEqual(rpRequestFrom(201, { link: 'openid4vp://?x', expires_at: at(5), session: 'r1' }), { link: 'openid4vp://?x', expires_at: at(5), session: 'r1' })
+  assert.deepEqual(rpRequestFrom(400, { error: 'invalid_claims' }), { error: 'Kies een of meer claims, elk één keer.' })
+})
+
+test('#737 D2/D3: a presented copy is found in the issuance it came from', async () => {
+  const { copyOrigin, describeRP, sessionChains } = await import('../src/lib/lifecycle.ts')
+  const chains = sessionChains([
+    event(0, 'session_started', 'a'),
+    event(1, 'credential_issued', 'a', { configuration: 'test-pid-pid', key_fingerprints: ['fp1', 'fp2', 'fp3'] }),
+  ])
+  const presented = {
+    at: at(5), kind: 'presented', session: 'r1', relying_party: 'b', relying_party_name: 'GBO testpartij B',
+    configuration: 'test-pid-pid', vct: 'urn:eudi:pid:nl:1', claims: ['birthdate'], key_fingerprint: 'fp2', status: 'valid',
+  }
+  const origin = copyOrigin(chains, 'fp2')
+  assert.equal(origin?.copy, 2)
+  assert.equal(origin?.of, 3)
+  assert.equal(describeRP(presented, origin), 'getoond aan GBO testpartij B: test-pid-pid (birthdate) · exemplaar 2 van 3 · geldig')
+  assert.equal(copyOrigin(chains, 'unknown'), null)
+  assert.equal(describeRP({ ...presented, status: 'revoked', key_fingerprint: 'x' }, null),
+    'getoond aan GBO testpartij B: test-pid-pid (birthdate) · uitgifte niet in de tijdlijn · ingetrokken')
+})
+
+test('#737 D5/D8: declined and rejected presentations', async () => {
+  const { describeRP } = await import('../src/lib/lifecycle.ts')
+  const base = { at: at(1), session: 'r1', relying_party: 'a', relying_party_name: 'GBO testpartij A', configuration: 'test-pid-pid', vct: 'v', claims: ['birthdate'] }
+  assert.equal(describeRP({ ...base, kind: 'declined', error: 'access_denied' }, null), 'geweigerd door de wallet voor GBO testpartij A: test-pid-pid (birthdate) (access_denied)')
+  assert.equal(describeRP({ ...base, kind: 'rejected', error: 'invalid_presentation', error_description: 'oid4vp: nonce mismatch' }, null), 'afgewezen door GBO testpartij A: oid4vp: nonce mismatch')
+})
+
+test('#737: an answered request loses its link; so does an expired one', async () => {
+  const { requestState } = await import('../src/lib/lifecycle.ts')
+  const req = { session: 'r1', expires_at: at(5) }
+  const presented = { at: at(2), kind: 'presented', session: 'r1', relying_party: 'a', relying_party_name: 'GBO testpartij A',
+    configuration: 'test-pid-pid', vct: 'v', claims: ['birthdate'], key_fingerprint: 'fp', status: 'valid' }
+  assert.deepEqual(requestState(req, [], new Date(at(1))), { state: 'open' })
+  assert.deepEqual(requestState(req, [{ ...presented, session: 'other' }], new Date(at(1))), { state: 'open' })
+  assert.deepEqual(requestState(req, [presented], new Date(at(3))), { state: 'answered', event: presented })
+  assert.deepEqual(requestState(req, [], new Date(at(5))), { state: 'expired' })
+})
+
 test('a refused refresh says why, in the session it would continue', () => {
   assert.equal(
     describe(event(0, 'token_refused', 'a', { grant_type: 'refresh_token', error: 'invalid_grant', error_description: 'the deferral has expired' })),

@@ -87,6 +87,10 @@ type config struct {
 	// and revokes them. Empty, the default, leaves the portal without its
 	// revocation panel: the API lets anyone revoke anything.
 	CredentialIssuerInternalURL string
+	// TestRPInternalURL is the internal API of the test relying party
+	// (#737). Empty, the default, leaves the lifecycle block without its
+	// presentation form.
+	TestRPInternalURL string
 	// CredentialIssuerStatusURL is where that issuer serves its status
 	// lists (/status/{provider}/{list}).
 	CredentialIssuerStatusURL string
@@ -164,6 +168,7 @@ func loadConfig() config {
 		TestPIDPersonsFile: getEnv("TEST_PID_PERSONS_FILE", "/test-pid-persons/personen.json"),
 
 		CredentialIssuerInternalURL: strings.TrimRight(os.Getenv("CREDENTIAL_ISSUER_INTERNAL_URL"), "/"),
+		TestRPInternalURL:           strings.TrimRight(os.Getenv("TEST_RP_INTERNAL_URL"), "/"),
 		CredentialIssuerStatusURL:   strings.TrimRight(os.Getenv("CREDENTIAL_ISSUER_STATUS_URL"), "/"),
 		EudiOffersURL:               os.Getenv("EUDI_OFFERS_URL"),
 	}
@@ -1090,6 +1095,7 @@ func main() {
 	registerTestPID(mux, newTestPIDService(cfg), revocations)
 	registerRevocation(mux, revocations)
 	registerLifecycle(mux, cfg.CredentialIssuerInternalURL)
+	registerTestRP(mux, cfg.TestRPInternalURL)
 
 	// BaseContext gives every request a context this process can cancel, which
 	// is how the long-lived SSE streams are told to wind up at shutdown.
