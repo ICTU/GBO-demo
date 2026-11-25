@@ -299,20 +299,33 @@ func (l conformanceLogin) Exchange(context.Context, string, string, string, stri
 // issuance waits for its source and discarded once the credential is
 // issued; the BSN of the login is never handed to the store in clear, and
 // neither is the credential or its signature.
-func TestConformanceDeferredIssuanceDiscardsTheHolderKey(t *testing.T) {
-	const (
-		redirect = "https://wallet.test/cb"
-		bsn      = "999991772"
-	)
+// deferredFlow logs in on the eudi profile while the source is away, and
+// asks for the credential with a key attestation for holder: the issuance
+// is deferred. The caller makes the source available.
+type deferredFlow struct {
+	svc     *issuance.Service
+	src     *deferredSource
+	target  issuance.Target
+	tok     oid4vci.TokenResponse
+	dpopKey *ecdsa.PrivateKey
+	holder  *ecdsa.PrivateKey
+	txID    string
+}
+
+const bsn = "999991772"
+
+func startDeferred(t *testing.T, store *recordingStore, events issuance.Events) deferredFlow {
+	t.Helper()
+	const redirect = "https://wallet.test/cb"
 	ctx := context.Background()
 	cfg := disclosureConfig(t)
+	cfg.Events = events
 	cfg.Login = conformanceLogin{bsn: bsn}
 	cfg.Profiles[1].WalletRedirectURIs = []string{redirect}
 	provider := testwallet.NewProvider(t, "provider")
 	anchors := provider.Anchors("provider")
 	cfg.Profiles[1].WalletProviders = []x5c.Anchors{anchors}
 	cfg.Profiles[1].KeyAttestationProviders = []x5c.Anchors{anchors}
-	store := newRecordingStore()
 	src := &deferredSource{}
 	svc, err := issuance.New(cfg, src, store, store, store, time.Now)
 	if err != nil {
@@ -376,7 +389,24 @@ func TestConformanceDeferredIssuanceDiscardsTheHolderKey(t *testing.T) {
 	if err != nil || !res.Deferred || res.Response.TransactionID == "" {
 		t.Fatalf("credential = %+v, %v; want a deferred issuance", res, err)
 	}
-	txID := res.Response.TransactionID
+	return deferredFlow{svc: svc, src: src, target: target, tok: tok, dpopKey: dpopKey, holder: holder, txID: res.Response.TransactionID}
+}
+
+// deferredRequest asks for the deferred credential of f.
+func (f deferredFlow) deferredRequest(t *testing.T) (issuance.CredentialResult, error) {
+	t.Helper()
+	id := f.svc.Identifier(f.target)
+	return f.svc.Deferred(context.Background(), issuance.DeferredCall{
+		Target: f.target, Authorization: "DPoP " + f.tok.AccessToken,
+		DPoP:    []string{testwallet.DPoP(t, f.dpopKey, "POST", id+"/deferred_credential", f.tok.AccessToken)},
+		Request: oid4vci.DeferredRequest{TransactionID: f.txID},
+	})
+}
+
+func TestConformanceDeferredIssuanceDiscardsTheHolderKey(t *testing.T) {
+	store := newRecordingStore()
+	f := startDeferred(t, store, nil)
+	src, holder := f.src, f.holder
 	key := holderKeyValues(t, holder)
 	if !store.stillHeld(key[0]) {
 		t.Fatal("while the issuance waits, the holder key must be kept for it")
@@ -385,11 +415,7 @@ func TestConformanceDeferredIssuanceDiscardsTheHolderKey(t *testing.T) {
 	src.mu.Lock()
 	src.available = true
 	src.mu.Unlock()
-	res, err = svc.Deferred(ctx, issuance.DeferredCall{
-		Target: target, Authorization: "DPoP " + tok.AccessToken,
-		DPoP:    []string{testwallet.DPoP(t, dpopKey, "POST", id+"/deferred_credential", tok.AccessToken)},
-		Request: oid4vci.DeferredRequest{TransactionID: txID},
-	})
+	res, err := f.deferredRequest(t)
 	if err != nil || len(res.Response.Credentials) != 1 {
 		t.Fatalf("deferred = %+v, %v; want the credential", res, err)
 	}
@@ -409,10 +435,6 @@ func TestConformanceDeferredIssuanceDiscardsTheHolderKey(t *testing.T) {
 		}
 	}
 	// The transaction is over: the holder key is gone with it.
-	_, err = svc.Deferred(ctx, issuance.DeferredCall{
-		Target: target, Authorization: "DPoP " + tok.AccessToken,
-		DPoP:    []string{testwallet.DPoP(t, dpopKey, "POST", id+"/deferred_credential", tok.AccessToken)},
-		Request: oid4vci.DeferredRequest{TransactionID: txID},
-	})
+	_, err = f.deferredRequest(t)
 	refusedWith(t, err, oid4vci.ErrInvalidTransactionID)
 }
