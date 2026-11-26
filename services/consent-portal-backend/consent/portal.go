@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -103,7 +104,7 @@ type GiveInput struct {
 	Scopes            []string
 	ScopeEntries      []ScopeEntry
 	ValiditySeconds   int
-	UseCase           string // the dienstverlener's stated purpose; DefaultUseCase when empty
+	UseCase           string // the dienstverlener's stated purpose; required
 	Trigger           string // "dev-portal" when the dev-portal drove this; narrative only
 	// InformationConfirmed is the citizen's confirmation that they have seen
 	// who asks, the purpose, the data and the validity. Without it the
@@ -138,9 +139,16 @@ type Granted struct {
 // happens first, and nothing below that line holds a BSN it could hand
 // onwards — Draft has no field that would accept one.
 func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Granted, error) {
+	// A consent the citizen did not confirm, or one that does not name what
+	// it is for, is refused before anything else: no BSNk call, no logged
+	// processing, no consent left behind.
 	if !in.InformationConfirmed {
 		return Granted{}, refuseUnconfirmed()
 	}
+	if err := p.checkScope(in); err != nil {
+		return Granted{}, err
+	}
+
 	emit := p.stepEmitter(ctx, "give_consent")
 
 	// Light up the portal component first: the citizen-side flow arrives
@@ -204,7 +212,7 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 		DienstverlenerOIN: in.DienstverlenerOIN,
 		Scopes:            in.Scopes,
 		ScopeEntries:      in.ScopeEntries,
-		UseCase:           useCaseOrDefault(in.UseCase),
+		UseCase:           strings.TrimSpace(in.UseCase),
 		ValiditySeconds:   in.ValiditySeconds,
 	})
 	if err != nil {
@@ -390,9 +398,21 @@ func (p *Portal) subjectRefFor(ctx context.Context, citizen BSN, aanleiding stri
 	return subject, nil
 }
 
-func useCaseOrDefault(useCase string) string {
-	if useCase = strings.TrimSpace(useCase); useCase != "" {
-		return useCase
+// checkScope refuses a consent that names no data set, names a data set the
+// portal does not know (KnownScopes), or names no purpose. The consent screen
+// only lets a citizen grant a complete consent; this check holds the same for
+// a request sent to the portal directly.
+func (p *Portal) checkScope(in GiveInput) error {
+	if len(in.Scopes) == 0 {
+		return refuse(ReasonScopeMissing, "a consent names at least one data set")
 	}
-	return DefaultUseCase
+	for _, scope := range in.Scopes {
+		if !slices.Contains(p.KnownScopes, scope) {
+			return refuse(ReasonScopeMissing, "data set %q is unknown", scope)
+		}
+	}
+	if strings.TrimSpace(in.UseCase) == "" {
+		return refuse(ReasonScopeMissing, "a consent names its purpose")
+	}
+	return nil
 }

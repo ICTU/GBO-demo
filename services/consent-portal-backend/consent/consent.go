@@ -82,11 +82,6 @@ const (
 	StatusRevoked Status = "revoked"
 )
 
-// DefaultUseCase labels a consent whose dienstverlener named no purpose. The
-// hypotheek flow predates the portal passing the purpose on, and the
-// dev-portal's scenarios still send none.
-const DefaultUseCase = "hypotheek"
-
 var (
 	// ErrNotFound is returned when the register has no such record.
 	ErrNotFound = errors.New("consent not found")

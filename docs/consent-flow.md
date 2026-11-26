@@ -220,8 +220,11 @@ return location:
   elke provider een eigen origin.
 - De directe `POST /portal/consents` blijft bestaan als developer-API (token
   in het antwoord, doel uit het verzoek); het developer portal en de
-  integrator gebruiken die. Die API slaat de toelatingscontroles van het
-  pushed request over: ook een inactieve of niet-geregistreerde
+  integrator gebruiken die. Een verzoek zonder data set, met een data set die
+  het portaal niet kent of zonder doel (`use_case`) weigert die API met `400`
+  en reden `CONSENT_SCOPE_MISSING`, voordat BSNk wordt aangeroepen; er wordt
+  dan niets vastgelegd en er is geen standaarddoel (#601). Die API slaat de
+  toelatingscontroles van het pushed request over: ook een inactieve of niet-geregistreerde
   dienstverlener krijgt er een consent mee, en wie een portal-login heeft,
   kan er via de `/portal-api`-proxy van het portaal een token voor elke
   `dienstverlener_oin` mee laten maken. Ook deze API weigert een consent

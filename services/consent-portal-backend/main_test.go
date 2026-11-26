@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -89,10 +90,11 @@ func TestPortalGiveThenList(t *testing.T) {
 	defer register.Close()
 
 	cfg := config{
-		Port:       "0",
-		BSNkURL:    bsnk.URL,
-		ConsentURL: register.URL,
-		Sources:    []consent.Party{{OIN: testSource, KeySetVersion: 20260101}},
+		Port:        "0",
+		BSNkURL:     bsnk.URL,
+		ConsentURL:  register.URL,
+		Sources:     []consent.Party{{OIN: testSource, KeySetVersion: 20260101}},
+		KnownScopes: []string{"bd:ib:2025"},
 
 		SubjectRefKey:        []byte(testSubjectRefKey),
 		SubjectRefKeyVersion: "1",
@@ -134,6 +136,7 @@ func TestPortalGiveThenList(t *testing.T) {
 		"dienstverlener_oin": "99999999900000001800",
 		"scopes": ["bd:ib:2025"],
 		"scope_entries": [],
+		"use_case": "Hypotheek aanvragen",
 		"information_confirmed": true
 	}`)
 	giveReq, _ := http.NewRequest(http.MethodPost, srv.URL+"/portal/consents", giveBody)
@@ -449,6 +452,7 @@ func TestASecondConsentOnlyTransforms(t *testing.T) {
 	srv := httptest.NewServer(newMux(newPortal(config{
 		BSNkURL: counting.URL, ConsentURL: register.URL,
 		Sources:       []consent.Party{{OIN: testSource, KeySetVersion: 20260101}},
+		KnownScopes:   []string{"bd:ib:2025"},
 		SubjectRefKey: []byte(testSubjectRefKey), SubjectRefKeyVersion: "1",
 	}, hub, nil), hub))
 	defer srv.Close()
@@ -466,7 +470,7 @@ func TestASecondConsentOnlyTransforms(t *testing.T) {
 		{"Find polymorphic values", "Read the BSN authorisation list", "Transform to pseudonyms", "Transform to identities", "Create Consent"},
 	} {
 		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/portal/consents",
-			strings.NewReader(`{"dienstverlener_oin":"99999999900000001800","scopes":["bd:ib:2025"],"information_confirmed":true}`))
+			strings.NewReader(`{"dienstverlener_oin":"99999999900000001800","scopes":["bd:ib:2025"],"use_case":"Hypotheek aanvragen","information_confirmed":true}`))
 		req.Header.Set("Authorization", "Bearer "+login.Token)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
@@ -563,5 +567,61 @@ func TestLoadConfigPushedRequests(t *testing.T) {
 		if _, err := loadConfig(); err == nil {
 			t.Errorf("PAR_REQUEST_LIFETIME=%s was accepted", lifetime)
 		}
+	}
+}
+
+// A consent sent to the portal directly, without the consent screen, is held
+// to the same rule as one the citizen grants there: without a known data set
+// or a purpose it is refused with CONSENT_SCOPE_MISSING, BSNk is not called
+// and the register records nothing (#601).
+func TestGiveConsentWithoutScopeIsRefused(t *testing.T) {
+	var upstream atomic.Int32
+	count := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream.Add(1)
+		http.Error(w, "not expected", http.StatusInternalServerError)
+	}))
+	defer count.Close()
+
+	hub := portalhttp.NewHub()
+	srv := httptest.NewServer(newMux(newPortal(config{
+		BSNkURL: count.URL, ConsentURL: count.URL,
+		Sources:       []consent.Party{{OIN: testSource, KeySetVersion: 20260101}},
+		KnownScopes:   []string{"bd:ib:2025"},
+		SubjectRefKey: []byte(testSubjectRefKey), SubjectRefKeyVersion: "1",
+	}, hub, nil), hub))
+	defer srv.Close()
+
+	loginResp, err := http.Post(srv.URL+"/portal/login", "application/json", bytes.NewBufferString(`{"citizen_bsn":"123456789"}`))
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	var login portalhttp.LoginResponse
+	_ = json.NewDecoder(loginResp.Body).Decode(&login)
+	_ = loginResp.Body.Close()
+
+	for name, body := range map[string]string{
+		"no data set":      `{"dienstverlener_oin":"99999999900000001800","information_confirmed":true,"use_case":"Hypotheek aanvragen"}`,
+		"empty data sets":  `{"dienstverlener_oin":"99999999900000001800","information_confirmed":true,"scopes":[],"use_case":"Hypotheek aanvragen"}`,
+		"unknown data set": `{"dienstverlener_oin":"99999999900000001800","information_confirmed":true,"scopes":["x:onbekend"],"use_case":"Hypotheek aanvragen"}`,
+		"no purpose":       `{"dienstverlener_oin":"99999999900000001800","information_confirmed":true,"scopes":["bd:ib:2025"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodPost, srv.URL+"/portal/consents", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+login.Token)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("give consent: %v", err)
+			}
+			defer resp.Body.Close()
+			var got map[string]any
+			_ = json.NewDecoder(resp.Body).Decode(&got)
+			if resp.StatusCode != http.StatusBadRequest || got["reason"] != "CONSENT_SCOPE_MISSING" {
+				t.Errorf("status %d, body %v; want 400 with reason CONSENT_SCOPE_MISSING", resp.StatusCode, got)
+			}
+		})
+	}
+	if n := upstream.Load(); n != 0 {
+		t.Errorf("BSNk or the register was called %d times", n)
 	}
 }

@@ -42,6 +42,9 @@ const (
 	// be read, so nothing could be checked. The request is refused: the
 	// checks fail closed. The PDP's autosign policy uses the same code.
 	ReasonAdmissionRegisterUnavailable ReasonCode = "ADMISSION_REGISTER_UNAVAILABLE"
+	// ReasonScopeMissing: a consent to be given names no data set, a data
+	// set the portal does not know, or no purpose. Nothing is recorded.
+	ReasonScopeMissing ReasonCode = "CONSENT_SCOPE_MISSING"
 )
 
 // Refusal is a request the checks refused, with the reason code the provider
