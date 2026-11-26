@@ -1289,6 +1289,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   status as it is and writes no `toestemming-intrekken` record. The detail
   page shows "Deze toestemming is al ingetrokken of verlopen en kan niet meer
   worden ingetrokken." instead of "Intrekken mislukt" and reloads the consent.
+- **A consent without a data set or purpose is refused** (#601). The consent
+  screen only lets a citizen grant a consent with a data set, but
+  `POST /portal/consents` sent directly recorded one without any data set or
+  with an unknown one, and filled a missing `use_case` in with `hypotheek`.
+  The consent portal backend now refuses such a consent before it calls BSNk
+  or logs anything, with `400` and reason `CONSENT_SCOPE_MISSING`: every data
+  set must be one it knows (`CONSENT_KNOWN_SCOPES`) and the purpose may not be
+  empty. There is no default purpose any more. The consent screen is
+  unchanged.
 - **The reference QTSP's end-to-end tests clean up after themselves.** They
   left the service processes they started running and a `qtsp-e2e-*`
   directory of about 30 MB (built binaries and generated keys) in the temp

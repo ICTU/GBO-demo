@@ -55,6 +55,7 @@ func TestGiveConsentLogsThePseudonymisation(t *testing.T) {
 		DienstverlenerOIN:    "99999999900000001400",
 		Scopes:               []string{"bd:ib:2025"},
 		InformationConfirmed: true,
+		UseCase:              "Hypotheek aanvragen",
 	}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -94,6 +95,7 @@ func TestOnlyTheRecordOfACallToBSNkPointsAtBSNk(t *testing.T) {
 		DienstverlenerOIN:    "99999999900000001400",
 		Scopes:               []string{"bd:ib:2025"},
 		InformationConfirmed: true,
+		UseCase:              "Hypotheek aanvragen",
 	}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -123,6 +125,7 @@ func TestGiveConsentThatCannotBeLoggedCreatesNoConsent(t *testing.T) {
 		DienstverlenerOIN:    "99999999900000001400",
 		Scopes:               []string{"bd:ib:2025"},
 		InformationConfirmed: true,
+		UseCase:              "Hypotheek aanvragen",
 	})
 	if err == nil {
 		t.Fatal("an unlogged consent must not be granted")
@@ -159,6 +162,7 @@ func TestListAndRevokeLogTheirPseudonymisation(t *testing.T) {
 					DienstverlenerOIN:    "99999999900000001400",
 					Scopes:               []string{"bd:ib:2025"},
 					InformationConfirmed: true,
+					UseCase:              "Hypotheek aanvragen",
 				})
 				if err != nil {
 					t.Fatalf("seed a consent: %v", err)
@@ -196,6 +200,7 @@ func TestNoBSNInAnyRecordedProcessing(t *testing.T) {
 		DienstverlenerOIN:    "99999999900000001400",
 		Scopes:               []string{"bd:ib:2025"},
 		InformationConfirmed: true,
+		UseCase:              "Hypotheek aanvragen",
 	})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
@@ -235,6 +240,7 @@ func TestAPortalWithoutALogbookStillWorks(t *testing.T) {
 		DienstverlenerOIN:    "99999999900000001400",
 		Scopes:               []string{"bd:ib:2025"},
 		InformationConfirmed: true,
+		UseCase:              "Hypotheek aanvragen",
 	}); err != nil {
 		t.Fatalf("give consent without a logbook: %v", err)
 	}
