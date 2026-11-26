@@ -15,8 +15,6 @@ services/asi-discovery-stub
 services/asi-mapping
 services/asi-provider
 services/asi-wallet-verifier
-services/bron-sidecar
-services/brp-graphql-server
 services/bsnk-mock
 services/consent-portal-backend
 services/consent-register
@@ -28,11 +26,7 @@ services/eudi-credential-issuer
 services/eudi-issuance-server
 services/eudi-wallet-verifier
 services/ftv-graphql-mapper
-services/graphql-server
-services/lvg-graphql-server
 services/oid4vc-kit
 services/openftv-pdp
 services/qtsp-reference
-services/source-registry
-services/test-pid-source
 toestemmingsportaal-frontend

@@ -122,10 +122,11 @@ type ldvQueryConfig struct {
 // A query covering 2024 and 2025 is two verstrekkingen, each named from its
 // own belastingjaar. A request without a year has no year-specific activity.
 //
-// A reference this bron's register does not hold is refused by the logbook and
-// fails the request. That is intended rather than a gap: a verstrekking whose
-// verwerkingsactiviteit is not described is one nobody can account for
-// afterwards.
+// The record is spooled in the LDV outbox, so the request does not wait for
+// the logbook. A reference this bron's register does not hold is refused when
+// the outbox delivers it, and that refusal stops the delivery of every later
+// record (see Outbox.Deliver in ldv-client); the request itself has already
+// succeeded.
 func (l *sourceLogbook) activityForYear(year int) string {
 	if l.cfg.YearActivityTemplate != "" && year != 0 {
 		return fmt.Sprintf(l.cfg.YearActivityTemplate, year)

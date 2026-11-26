@@ -305,9 +305,10 @@ func subjectFromBody(body []byte, subjectVars []string) map[string]string {
 //
 // It is also where two of this Verantwoordelijke's Dataverwerkingen are
 // logged to its Logboek Dataverwerkingen: the decryption of the identity and
-// the forward itself. When a logbook is configured, a record that the logbook
-// does not confirm fails the request — the response is withheld rather than
-// returned unlogged.
+// the forward itself. When a logbook is configured, a record that cannot be
+// spooled in the LDV outbox fails the request — the response is withheld
+// rather than returned unlogged. The logbook's own refusal comes later, when
+// the outbox delivers the record, and no longer fails the request.
 //
 // After a 200 under a consent the delivery is registered at the data usage
 // index and recorded in the delivery logbook (deliveries.record), after the
@@ -684,7 +685,8 @@ func main() {
 	// not and writes no records. The activity references are configuration:
 	// the same image runs in front of every bron, and each bron's register
 	// names its processings in its own terms. A reference the logbook does not
-	// know is refused at write time, which fails the request.
+	// know is refused when the outbox delivers the record, after the request
+	// has succeeded.
 	logbook, err := ldv.New(ldv.Config{
 		ServiceName:  serviceName,
 		LogbookURL:   os.Getenv("LDV_LOGBOOK_URL"),
