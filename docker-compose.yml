@@ -1756,7 +1756,8 @@ services:
       - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${GBO_PUBLIC_HOST:-localhost},${GBO_EXTRA_ALLOWED_HOSTS:-}
       - CHOKIDAR_USEPOLLING=true
       - IR_API_TARGET=http://ir-backend:4010
-      # Not one port up from this app, unlike the dienstverlener-mock.
+      # Only for the link to "Mijn toestemmingen"; the consent request gets the
+      # portal's address from ir-backend.
       - VITE_CONSENT_PORTAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
     volumes:
       - ./keyper-mock/src:/app/src

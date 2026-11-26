@@ -24,9 +24,8 @@ export function runtimeConfigValue(value?: string): string {
 
 type RuntimeConfig = Window['__GBO_CONFIG__']
 
-// Configured explicitly: unlike the dienstverlener-mock, the portal is not
-// one port up from this app. Only the link to "Mijn toestemmingen" needs it:
-// the consent request gets the portal's address from the backend.
+// Configured explicitly. Only the link to "Mijn toestemmingen" needs it: the
+// consent request gets the portal's address from the backend.
 export function portalBase(
   config: RuntimeConfig = window.__GBO_CONFIG__,
   env: ImportMetaEnv = import.meta.env,

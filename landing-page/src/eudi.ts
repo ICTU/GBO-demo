@@ -5,7 +5,7 @@ import { eudi } from './config'
    een sessie. Deze pagina hoeft dus niets voor te bereiden en heeft geen
    backend nodig.
 
-   Zelfde constructie als in developer-portal/src/components/EudiForm.tsx
+   Zelfde constructie als in developer-portal/src/eudi.ts
    (walletUniversalLinkFor). Bewust gedupliceerd: de frontends in deze repo
    staan los van elkaar, met een eigen package.json en zonder gedeeld
    pakket. Wijzigt het linkformaat, dan moeten beide mee. */
