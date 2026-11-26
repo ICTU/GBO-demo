@@ -24,8 +24,14 @@ var codeVerifier = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
 
 // ErrInvalidGrant is returned when a code cannot be exchanged: it is
 // unknown, used, expired, issued to another provider or for another
-// redirect URI, or the code verifier does not match its challenge.
+// redirect URI, or the code verifier does not match its challenge. A
+// refresh is refused with it too: the refresh token is unknown, was issued
+// to another client, or its consent was revoked or has ended.
 var ErrInvalidGrant = errors.New("invalid grant")
+
+// ErrInvalidScope is returned when a refresh asks for a scope that is not
+// the whole consent.
+var ErrInvalidScope = errors.New("invalid scope")
 
 // IssuedCode is what a code stands for until the provider exchanges it.
 type IssuedCode struct {
@@ -44,12 +50,17 @@ type TokenRequest struct {
 	CodeVerifier string
 }
 
-// Token is what the provider gets for a code: the consent token, the
-// consent's ID and the data sets the citizen consented to.
+// Token is what the provider gets for a code or a refresh: the consent
+// token, how long it holds, the consent's ID and the data sets the citizen
+// consented to. RefreshToken is set only by a code exchange, and only for a
+// consent the register gave one for.
 type Token struct {
 	ConsentToken string
 	ConsentID    string
 	Scopes       []string
+	// ExpiresIn is the time from now to the token's exp, never negative.
+	ExpiresIn    time.Duration
+	RefreshToken string
 }
 
 // ExchangeCode gives provider, the authenticated peer, the consent token
@@ -92,7 +103,52 @@ func (p *Portal) ExchangeCode(_ context.Context, provider PeerID, request TokenR
 		ConsentToken: issued.Consent.ConsentToken,
 		ConsentID:    issued.Consent.ConsentID,
 		Scopes:       slices.Clone(issued.Scopes),
+		ExpiresIn:    p.until(issued.Consent.TokenExpiresAt),
+		RefreshToken: issued.Consent.RefreshToken,
 	}, nil
+}
+
+// RefreshRequest is a client's refresh grant (RFC 6749 §6).
+type RefreshRequest struct {
+	RefreshToken string
+	// Scopes is what the client asked for; empty means the whole consent.
+	Scopes []string
+}
+
+// RefreshProof gives client, the authenticated FSC peer, a new consent token
+// for the consent its refresh token belongs to (RFC 6749 §6). The register
+// decides: the token must be one it issued to this client, for a consent that
+// is active and has not ended, and a scope, when sent, must be the whole
+// consent. A refusal returns an error wrapping ErrInvalidGrant or
+// ErrInvalidScope.
+//
+// The refresh token is not rotated: the answer has no new one, and the
+// client keeps using the token it got with the code. One token per consent,
+// bound to the client's FSC peer, until the consent ends. RFC 6749 §6 allows
+// it, and RFC 9700 §4.14.2 asks for rotation or sender-constraining only for
+// public clients; a client here authenticates with its FSC identity.
+func (p *Portal) RefreshProof(ctx context.Context, client PeerID, request RefreshRequest) (Token, error) {
+	if request.RefreshToken == "" {
+		return Token{}, fmt.Errorf("%w: no refresh token", ErrInvalidGrant)
+	}
+	if p.Consents == nil {
+		return Token{}, errors.New("no consent register is configured")
+	}
+	proof, err := p.Consents.Refresh(ctx, request.RefreshToken, client, slices.Clone(request.Scopes))
+	if err != nil {
+		return Token{}, err
+	}
+	return Token{
+		ConsentToken: proof.ConsentToken,
+		ConsentID:    proof.ConsentID,
+		Scopes:       slices.Clone(proof.Scopes),
+		ExpiresIn:    p.until(proof.ExpiresAt),
+	}, nil
+}
+
+// until is the time from now to at, or zero once at has passed.
+func (p *Portal) until(at time.Time) time.Duration {
+	return max(0, at.Sub(p.now()))
 }
 
 // verifies reports whether verifier is a code verifier whose S256

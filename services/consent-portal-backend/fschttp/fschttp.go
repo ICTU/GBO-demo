@@ -205,26 +205,43 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // tokenResponse is the success response of RFC 6749 §5.1: the consent
-// token as the access token, with the consent's ID and the data sets the
-// citizen consented to.
+// token as the access token, how many seconds it holds, the consent's ID and
+// the data sets the citizen consented to. A code exchange also carries the
+// refresh token, when the consent has one; a refresh does not, because the
+// refresh token is not rotated.
 type tokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	Scope       string `json:"scope"`
-	ConsentID   string `json:"consent_id"`
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	Scope        string `json:"scope"`
+	ConsentID    string `json:"consent_id"`
+}
+
+func newTokenResponse(token consent.Token) tokenResponse {
+	return tokenResponse{
+		AccessToken:  token.ConsentToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int(math.Ceil(token.ExpiresIn.Seconds())),
+		RefreshToken: token.RefreshToken,
+		Scope:        strings.Join(token.Scopes, " "),
+		ConsentID:    token.ConsentID,
+	}
 }
 
 // handleToken serves POST /token, where a provider exchanges the code of a
 // granted decision for the consent token (RFC 6749 §4.1.3, with the PKCE
-// verifier of RFC 7636 §4.5). The provider is the calling peer; a
-// client_id, when sent, must be that peer.
+// verifier of RFC 7636 §4.5), or refreshes the consent token with the
+// refresh token it got with the code (RFC 6749 §6). The provider is the
+// calling peer, and so the client a refresh token must have been issued to;
+// a client_id, when sent, must be that peer.
 func handleToken(portal *consent.Portal) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		provider := callingPeer(r)
 		if provider == "" {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:       "invalid_client",
-				Description: "codes are only exchanged over FSC",
+				Description: "the token endpoint is only reachable over FSC",
 			})
 			return
 		}
@@ -234,25 +251,32 @@ func handleToken(portal *consent.Portal) http.HandlerFunc {
 		}
 		form := r.PostForm
 		problem := repeatedParameter(form)
+		grantType := form.Get("grant_type")
 		switch {
 		case problem != "":
-		case form.Get("grant_type") == "":
+		case grantType == "":
 			problem = "the request has no grant_type"
-		case form.Get("grant_type") != "authorization_code":
+		case grantType != "authorization_code" && grantType != "refresh_token":
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:       "unsupported_grant_type",
-				Description: "only grant_type=authorization_code is supported",
+				Description: "only grant_type=authorization_code and grant_type=refresh_token are supported",
 			})
 			return
-		case form.Get("code") == "":
+		case grantType == "authorization_code" && form.Get("code") == "":
 			problem = "the request has no code"
-		case form.Get("redirect_uri") == "":
+		case grantType == "authorization_code" && form.Get("redirect_uri") == "":
 			problem = "the request has no redirect_uri"
+		case grantType == "refresh_token" && form.Get("refresh_token") == "":
+			problem = "the request has no refresh_token"
 		case form.Has("client_id") && form.Get("client_id") != string(provider):
 			problem = "client_id is not the calling peer"
 		}
 		if problem != "" {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid_request", Description: problem})
+			return
+		}
+		if grantType == "refresh_token" {
+			refreshToken(w, r, portal, provider)
 			return
 		}
 
@@ -272,11 +296,33 @@ func handleToken(portal *consent.Portal) http.HandlerFunc {
 			return
 		}
 		slog.InfoContext(r.Context(), "code exchanged", "provider", string(provider), "consent_id", token.ConsentID)
-		writeJSON(w, http.StatusOK, tokenResponse{
-			AccessToken: token.ConsentToken,
-			TokenType:   "Bearer",
-			Scope:       strings.Join(token.Scopes, " "),
-			ConsentID:   token.ConsentID,
-		})
+		writeJSON(w, http.StatusOK, newTokenResponse(token))
 	}
+}
+
+// refreshToken answers a refresh grant whose form has been checked: a new
+// consent token without a new refresh token, invalid_grant or invalid_scope
+// for a refusal (RFC 6749 §5.2), and server_error when the register gave no
+// answer.
+func refreshToken(w http.ResponseWriter, r *http.Request, portal *consent.Portal, provider consent.PeerID) {
+	token, err := portal.RefreshProof(r.Context(), provider, consent.RefreshRequest{
+		RefreshToken: r.PostForm.Get("refresh_token"),
+		Scopes:       strings.Fields(r.PostForm.Get("scope")),
+	})
+	switch {
+	case errors.Is(err, consent.ErrInvalidGrant):
+		slog.WarnContext(r.Context(), "refresh refused", "provider", string(provider), "err", err.Error())
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid_grant", Description: err.Error()})
+		return
+	case errors.Is(err, consent.ErrInvalidScope):
+		slog.WarnContext(r.Context(), "refresh refused", "provider", string(provider), "err", err.Error())
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid_scope", Description: err.Error()})
+		return
+	case err != nil:
+		slog.ErrorContext(r.Context(), "refresh failed", "provider", string(provider), "err", err.Error())
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "server_error"})
+		return
+	}
+	slog.InfoContext(r.Context(), "consent token refreshed", "provider", string(provider), "consent_id", token.ConsentID)
+	writeJSON(w, http.StatusOK, newTokenResponse(token))
 }

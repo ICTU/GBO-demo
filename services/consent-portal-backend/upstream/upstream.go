@@ -23,6 +23,18 @@ import (
 	"gbo-demo/consent-portal-backend/consent"
 )
 
+// StatusError is the error of a call the downstream service answered with a
+// status of 400 or above. Body is its answer, for an adapter that translates
+// the service's own error codes.
+type StatusError struct {
+	Status int
+	Body   []byte
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("upstream %d: %s", e.Status, string(e.Body))
+}
+
 // Caller issues JSON requests over a shared client.
 type Caller struct {
 	Client *http.Client
@@ -76,7 +88,7 @@ func (c Caller) do(ctx context.Context, label, method, rawURL string, body, resu
 	c.report(ctx, label, method, rawURL, resp.StatusCode, reportBytes(reqBytes, reportBodies), reportBytes(respBytes, reportBodies), durationMS)
 
 	if resp.StatusCode >= 400 {
-		return resp.StatusCode, fmt.Errorf("upstream %d: %s", resp.StatusCode, string(respBytes))
+		return resp.StatusCode, &StatusError{Status: resp.StatusCode, Body: respBytes}
 	}
 	if result != nil {
 		if err := json.Unmarshal(respBytes, result); err != nil {

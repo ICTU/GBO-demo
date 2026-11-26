@@ -119,9 +119,9 @@ sequenceDiagram
         Portal->>Portal: subject_ref = HMAC van het BSN
         Portal->>BSNk: Activeer (eerste keer) en transformeer per bron
         BSNk-->>Portal: Versleutelde waarden per bron
-        Portal->>Register: Maak consent met waarde per bron, subject_ref, OIN en scopes
-        Register-->>Portal: Consent-id en consent-token
-        Portal->>Portal: Leg het token onder een eenmalige code (60 s)
+        Portal->>Register: Maak consent met waarde per bron, subject_ref, OIN, scopes en client_peer
+        Register-->>Portal: Consent-id, consent-token, expires_at en refresh token
+        Portal->>Portal: Leg ze onder een eenmalige code (60 s)
     end
     Portal-->>Citizen: Bevestiging, daarna redirect_uri met code en state (of error en state)
 
@@ -130,17 +130,28 @@ sequenceDiagram
     UI->>BE: POST /api/consent/complete (code, state)
     BE->>BE: Controleer state
     BE->>Portal: POST /token via FSC (code, code_verifier)
-    Portal-->>BE: access_token (het consent-token)
+    Portal-->>BE: access_token (het consent-token), expires_in, refresh_token
     BE->>BE: Bewaar het token in de sessie (HttpOnly-cookie)
     BE-->>UI: Uitkomst, zonder token
+
+    opt Later, zonder de burger
+        BE->>Portal: POST /token via FSC (grant_type=refresh_token, refresh_token)
+        Portal->>Portal: Client = FSC peer ID uit Fsc-Authorization
+        Portal->>Register: POST /proofs/refresh (refresh_token, client_peer)
+        Register-->>Portal: Nieuw consent-token en expires_at, of invalid_grant
+        Portal-->>BE: access_token en expires_in, zonder nieuw refresh_token
+    end
 ```
 
 De pseudonimisering is ongewijzigd: bij de eerste toestemming van een burger
 activeert het portaal het BSN bij BSNk en bewaart het register de polymorfe
 waarden onder `subject_ref`; bij elke toestemming leest het portaal de
 Autorisatielijst BSN (hooguit eens per `BSN_AUTHORISATION_LIST_MAX_AGE`) en
-laat het de waarden per bron transformeren. Het register bewaart het consent
-zonder die waarden en ondertekent het token met ES256.
+laat het de waarden per bron transformeren. Het register ondertekent het token
+met ES256. Omdat het portaal in deze flow de `client_peer` meegeeft, bewaart
+het register de waarden bij de toestemming zolang die loopt, voor een refresh
+(zie [Looptijd van het token en
+vernieuwen](#looptijd-van-het-token-en-vernieuwen)).
 
 Dit wijkt af van figuur 4 van het Globaal Ontwerp, waar de dienstverlener
 scope en doelbinding in de redirect meegeeft en de toestemmingsvoorziening
@@ -179,10 +190,12 @@ bereikt de burger niet.
 | Resolve, beslissing | 502 | | | Interne fout, zoals een ontbrekende opslag van verzoeken of een subject reference die niet af te leiden is |
 | `/token` | 401 | `invalid_client` | | Geen `Fsc-Authorization` |
 | `/token` | 413 | `invalid_request` | | De body is groter dan 64 KiB |
-| `/token` | 400 | `invalid_request` | | De body is niet `application/x-www-form-urlencoded`, een parameter komt meer dan eens voor, `grant_type`, `code` of `redirect_uri` ontbreekt, of `client_id` is niet de FSC peer die aanroept |
-| `/token` | 400 | `unsupported_grant_type` | | Een andere `grant_type` dan `authorization_code` |
+| `/token` | 400 | `invalid_request` | | De body is niet `application/x-www-form-urlencoded`, een parameter komt meer dan eens voor, `grant_type` ontbreekt, `code` of `redirect_uri` ontbreekt (code), `refresh_token` ontbreekt (refresh), of `client_id` is niet de FSC peer die aanroept |
+| `/token` | 400 | `unsupported_grant_type` | | Een andere `grant_type` dan `authorization_code` of `refresh_token` |
 | `/token` | 400 | `invalid_grant` | | Code onbekend, al ingewisseld, ouder dan 60 seconden, van een andere provider, met een andere `redirect_uri` dan in het verzoek, of met een verkeerde `code_verifier` |
-| `/token` | 500 | `server_error` | | Interne fout, zoals een ontbrekende opslag van codes |
+| `/token` (refresh) | 400 | `invalid_grant` | | Refresh token onbekend of van een andere client (FSC peer), of de toestemming is ingetrokken of voorbij `valid_until` |
+| `/token` (refresh) | 400 | `invalid_scope` | | Een `scope` die niet de hele toestemming is |
+| `/token` | 500 | `server_error` | | Interne fout, zoals een ontbrekende opslag van codes, of het register geeft geen antwoord op een refresh |
 
 Bij een geweigerde referentie toont het portaal één foutpagina, zonder link
 en zonder redirect. Na een beslissing gaat de burger naar de geregistreerde
@@ -265,16 +278,31 @@ token is een verwerking `gbo-toestemmingsbewijs-vernieuwen` voor de client;
 lukt het vastleggen niet, dan geeft het register geen token (`server_error`).
 Een intrekking wist de waarden en de hash in dezelfde transactie als de
 statuswijziging; de eerste geweigerde refresh na `valid_until` wist ze ook.
-Het token endpoint van het portaal biedt de refresh grant nog niet aan; de
-directe developer-API geeft geen `client_peer` mee en krijgt dus geen refresh
-token.
+De directe developer-API geeft geen `client_peer` mee en krijgt dus geen
+refresh token.
+
+De provider gebruikt het refresh token op het token endpoint van het portaal
+over FSC (RFC 6749 §6): `POST /token` met `grant_type=refresh_token`,
+`refresh_token` en optioneel `scope` en `client_id`. De client is de FSC peer
+uit `Fsc-Authorization`, dezelfde die het pushed request deed en de code
+inwisselde; die geeft het portaal als `client_peer` door aan
+`POST /proofs/refresh`. Het antwoord heeft `access_token`, `token_type`,
+`expires_in` (seconden tot `exp`, uit `expires_at`), `scope` en `consent_id`,
+maar geen nieuw `refresh_token`: de provider houdt het token dat hij bij de
+code exchange kreeg. Ook de code exchange geeft nu `expires_in` en
+`refresh_token`. Het portaal zelf bewaart geen refresh tokens en logt de
+refresh niet: dat doet het register.
 
 Intrekken werkt al bij de eerstvolgende vraag, omdat de PDP de status bij
 elke vraag ophaalt; die controle blijft ook met korte tokens nodig.
 
 Demo shortcuts: `POST /proofs/refresh` is, net als `POST /consents`, zonder
 authenticatie bereikbaar op het `backend`-netwerk; een echte uitrol beperkt
-het tot de portal-backend. Een verlopen toestemming waarvoor geen refresh meer
+het tot de portal-backend. De binding van het refresh token aan de client
+steunt op `Fsc-Authorization`, die de FSC-listener van het portaal niet
+verifieert (zie de shortcuts hierboven): wie op de netwerken `fsc-infra` of
+`backend` zit en het refresh token van een ander heeft, kan diens peer
+claimen. Een verlopen toestemming waarvoor geen refresh meer
 komt, houdt haar waarden tot ze wordt opgeruimd; een echte uitrol ruimt
 verlopen toestemmingen periodiek op.
 

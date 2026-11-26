@@ -54,7 +54,7 @@ func TestPortalGiveThenList(t *testing.T) {
 			regMu.Lock()
 			created = append(created, body)
 			regMu.Unlock()
-			_, _ = w.Write([]byte(`{"consent_id":"c-1","consent_token":"signed-consent-token"}`))
+			_, _ = w.Write([]byte(`{"consent_id":"c-1","consent_token":"signed-consent-token","expires_at":"2027-11-10T12:00:00Z"}`))
 		case strings.HasPrefix(r.URL.Path, "/subjects/") && strings.HasSuffix(r.URL.Path, "/polymorphic"):
 			regMu.Lock()
 			defer regMu.Unlock()
@@ -175,6 +175,11 @@ func TestPortalGiveThenList(t *testing.T) {
 	regMu.Unlock()
 	if strings.Contains(string(sent), "123456789") {
 		t.Errorf("BSN reached the consent register: %s", sent)
+	}
+	// The direct developer API names no client peer, so the register gives
+	// it no refresh token.
+	if strings.Contains(string(sent), "client_peer") {
+		t.Errorf("the developer API asked for a refresh token: %s", sent)
 	}
 
 	// Step 3: list consents — should surface the one we just created.
@@ -437,7 +442,7 @@ func TestASecondConsentOnlyTransforms(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(kept))
 		case r.URL.Path == "/consents" && r.Method == http.MethodPost:
-			_, _ = w.Write([]byte(`{"consent_id":"c-1","consent_token":"signed-consent-token"}`))
+			_, _ = w.Write([]byte(`{"consent_id":"c-1","consent_token":"signed-consent-token","expires_at":"2027-11-10T12:00:00Z"}`))
 		default:
 			http.NotFound(w, r)
 		}

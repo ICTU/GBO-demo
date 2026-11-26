@@ -37,6 +37,12 @@ type Identities interface {
 // The register also keeps the polymorphic values of a citizen's first
 // activation, under the portal's reference to them. PolymorphicFor returns
 // an error wrapping ErrNotFound for a citizen who has none yet.
+//
+// Refresh has the register sign a new proof for the consent a refresh token
+// belongs to, for client, the FSC peer asking. A refusal returns an error
+// wrapping ErrInvalidGrant (unknown token, another client, a revoked or
+// ended consent) or ErrInvalidScope (a scope that is not the whole consent);
+// any other error means the register did not give a proof.
 type Store interface {
 	Create(ctx context.Context, d Draft) (Record, error)
 	ListBySubject(ctx context.Context, subject SubjectRef) ([]Record, error)
@@ -48,6 +54,16 @@ type Store interface {
 	// the uses, and the notices the citizen must see instead of or next to
 	// them. An error means the register itself did not answer.
 	Uses(ctx context.Context, consentID string) (Usage, error)
+	Refresh(ctx context.Context, refreshToken string, client PeerID, scopes []string) (Proof, error)
+}
+
+// Proof is a consent proof the register signed on a refresh: the consent's
+// ID and data sets, the token, and its exp.
+type Proof struct {
+	ConsentID    string
+	ConsentToken string
+	ExpiresAt    time.Time
+	Scopes       []string
 }
 
 // Registrations is the DvTP admission register seen from the core.

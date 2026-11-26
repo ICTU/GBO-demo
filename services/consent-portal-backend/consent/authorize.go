@@ -181,6 +181,9 @@ func (p *Portal) Decide(ctx context.Context, citizen BSN, requestURI string, dec
 		Scopes:            scopes,
 		ValiditySeconds:   max(1, int(validity.Seconds())),
 		UseCase:           verified.Purpose,
+		// The refresh token is bound to the peer that pushed the request,
+		// which is also the only one that can exchange the code.
+		ClientPeer: verified.Provider,
 	})
 	if err == nil {
 		// Once the consent is given, issuing its code cannot fail: the store

@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -119,10 +120,52 @@ type memStore struct {
 	polymorphic map[SubjectRef]Polymorphic
 	uses        map[string]Usage
 	usesErr     error
+	// tokenExpiresAt is the exp of every token this register signs.
+	tokenExpiresAt time.Time
+	// refreshTokens maps a refresh token to its consent and client.
+	refreshTokens map[string]refreshBinding
+	refreshes     []refreshCall
+	refreshErr    error
+}
+
+type refreshBinding struct {
+	consentID string
+	client    PeerID
+}
+
+type refreshCall struct {
+	token  string
+	client PeerID
+	scopes []string
 }
 
 func newMemStore() *memStore {
-	return &memStore{recs: make(map[string]Record), polymorphic: make(map[SubjectRef]Polymorphic)}
+	return &memStore{
+		recs:          make(map[string]Record),
+		polymorphic:   make(map[SubjectRef]Polymorphic),
+		refreshTokens: make(map[string]refreshBinding),
+	}
+}
+
+// Refresh is the register's refresh in short: the token must be one it gave
+// to client, for a consent that is not revoked.
+func (m *memStore) Refresh(_ context.Context, token string, client PeerID, scopes []string) (Proof, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshes = append(m.refreshes, refreshCall{token: token, client: client, scopes: scopes})
+	if m.refreshErr != nil {
+		return Proof{}, m.refreshErr
+	}
+	binding, ok := m.refreshTokens[token]
+	if !ok || binding.client != client || m.recs[binding.consentID].Status != "ACTIVE" {
+		return Proof{}, fmt.Errorf("%w: refused", ErrInvalidGrant)
+	}
+	return Proof{
+		ConsentID:    binding.consentID,
+		ConsentToken: "refreshed-consent-token",
+		ExpiresAt:    m.tokenExpiresAt,
+		Scopes:       []string{"bd:ib:2025"},
+	}, nil
 }
 
 func (m *memStore) PolymorphicFor(_ context.Context, subject SubjectRef) (Polymorphic, error) {
@@ -163,11 +206,16 @@ func (m *memStore) Create(_ context.Context, d Draft) (Record, error) {
 	id := "c-" + string(rune('0'+m.seq))
 	m.created = append(m.created, d)
 	rec := Record{
-		ID:         id,
-		SubjectRef: d.SubjectRef,
-		Token:      "signed-consent-token",
-		Status:     "ACTIVE",
-		Raw:        map[string]any{"consent_id": id, "subject_ref": string(d.SubjectRef), "status": "ACTIVE"},
+		ID:             id,
+		SubjectRef:     d.SubjectRef,
+		Token:          "signed-consent-token",
+		TokenExpiresAt: m.tokenExpiresAt,
+		Status:         "ACTIVE",
+		Raw:            map[string]any{"consent_id": id, "subject_ref": string(d.SubjectRef), "status": "ACTIVE"},
+	}
+	if d.ClientPeer != "" {
+		rec.RefreshToken = "refresh-token-of-" + id
+		m.refreshTokens[rec.RefreshToken] = refreshBinding{consentID: id, client: d.ClientPeer}
 	}
 	if d.ValiditySeconds > 0 {
 		rec.ValidUntil = time.Now().Add(time.Duration(d.ValiditySeconds) * time.Second)
