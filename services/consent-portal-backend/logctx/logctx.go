@@ -45,6 +45,10 @@ func WithAccessLog(next http.Handler) http.Handler {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
+		// Health probes poll every few seconds; log only failing ones.
+		if r.URL.Path == "/health" && sw.status < http.StatusBadRequest {
+			return
+		}
 		From(r.Context()).Info("http",
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
