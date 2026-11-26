@@ -336,6 +336,13 @@ plaatshouders die zijn API accepteert; een andere waarde wordt geweigerd met
 `CONSTRAINT_MISMATCH`. `DVT0001` en `LVG0001` accepteren alleen
 `consent:identity`; geen demobron neemt nog een pseudoniem aan.
 
+De plaatshouder moet als variabele meekomen (`variables.bsn`), niet letterlijk
+in de querytekst (`ingeschrevenPersoon(bsn: "consent:identity")`) en niet als
+default van de variabele in de operatie. De sidecar vervangt alleen
+variabelen; een plaatshouder op een andere plek bereikt de bron ongewijzigd en
+noemt daar niemand. De policy weigert zo'n verzoek daarom ook met
+`CONSTRAINT_MISMATCH`.
+
 Pas na de `ALLOW` zet de sidecar bij de bron het BSN of haar eigen pseudoniem
 op de plek van de plaatshouder. De bron ontsleutelt daarvoor zelf de waarde
 van die vorm die het token voor haar OIN draagt, met sleutels die ze vooraf

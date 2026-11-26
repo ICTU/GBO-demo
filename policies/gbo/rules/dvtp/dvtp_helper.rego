@@ -66,9 +66,15 @@ consent_given_to_caller if {
 
 # A placeholder stands for the citizen only under a verified consent;
 # without one it names nobody.
+#
+# And only as a variable the request supplied: the source's sidecar replaces
+# the placeholder in the request's variables, never in the query text. A
+# placeholder written in the query, or declared as the variable's default,
+# reaches the source as it is and names nobody there.
 names_consent_citizen(f, name, placeholders) if {
 	consent_verified
 	value := lib.argument(f, name)
 	value in placeholders
 	value in lib.subject_placeholders
+	lib.from_variable(f, name)
 }

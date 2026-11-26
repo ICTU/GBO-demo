@@ -36,6 +36,18 @@ test_both_placeholders_stand_for_the_citizen if {
 	}
 }
 
+# Only as a variable the request supplied: the sidecar replaces the
+# placeholder in the variables, not in the query text or a declared default.
+test_placeholder_names_nobody_outside_the_variables if {
+	every origin in {"literal", "default:bsn", "mixed", "schema-default"} {
+		every placeholder in _both {
+			person := fx.person_as(["ingeschrevenPersoon"], {"value": placeholder, "origin": origin})
+			not helper.names_consent_citizen(person, "bsn", _both) with input as _request
+				with data.gbo.consent.resolved as _consent
+		}
+	}
+}
+
 test_placeholder_names_nobody_without_consent if {
 	every placeholder in _both {
 		not helper.names_consent_citizen(fx.person(placeholder), "bsn", _both) with input as _request

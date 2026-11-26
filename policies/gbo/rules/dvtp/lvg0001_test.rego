@@ -54,6 +54,14 @@ test_deny_pseudonym_placeholder if {
 	_reasons(_request(_ir, "consent:pseudonym"), _consent) == {"CONSTRAINT_MISMATCH"}
 }
 
+# The placeholder written in the query text, vbo(bsn: "consent:identity"),
+# reaches the source as it is: the sidecar replaces only variables.
+test_deny_placeholder_in_the_query_text if {
+	vbo := object.union(fx.vbo("consent:identity"), {"args": {"bsn": fx.literal("consent:identity")}})
+	req := fx.request(_ir, "lvg", [vbo, fx.ownership_fields("consent:identity")[1]], fx.headers)
+	_reasons(req, _consent) == {"CONSTRAINT_MISMATCH"}
+}
+
 test_deny_withdrawn_consent if {
 	_reasons(_ownership, object.union(_consent, {"withdrawn": true})) == {"CONSENT_WITHDRAWN"}
 }

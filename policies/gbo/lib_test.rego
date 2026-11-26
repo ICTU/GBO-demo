@@ -13,3 +13,13 @@ test_fields_are_every_mapper_record if {
 	got := lib.fields with input as fx.request(fx.hv, "bri", fields, fx.headers)
 	got == fields
 }
+
+# ── Where an argument's value comes from ────────────────────────────────
+
+test_from_variable_only_for_a_supplied_variable if {
+	lib.from_variable({"args": {"bsn": fx.variable("bsn", "consent:identity")}}, "bsn")
+	not lib.from_variable({"args": {"bsn": fx.literal("consent:identity")}}, "bsn")
+	not lib.from_variable({"args": {"bsn": {"value": "consent:identity", "origin": "default:bsn"}}}, "bsn")
+	not lib.from_variable({"args": {"bsn": fx.schema_default("consent:identity")}}, "bsn")
+	not lib.from_variable({"args": {}}, "bsn")
+}

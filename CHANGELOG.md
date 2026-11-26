@@ -1271,6 +1271,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   directory of about 30 MB (built binaries and generated keys) in the temp
   directory after every run. The tests now stop the processes and remove the
   directory when they finish, and also when starting the stack fails.
+- **The policy accepts the subject placeholder only as a query variable**
+  (#603). The PDP allowed `ingeschrevenPersoon(bsn: "consent:identity")`
+  with the placeholder written in the query text, but the source's sidecar
+  replaces the placeholder only in the request's variables, so the source
+  then looked up nobody. `DVT0001` and `LVG0001` now refuse a placeholder
+  that is not a variable the request supplied (also one declared as the
+  variable's default) with `CONSTRAINT_MISMATCH`, through
+  `names_consent_citizen` in the DvTP helper and the new
+  `lib.from_variable`.
 - **README and TROUBLESHOOTING cover the EUDI setup beyond localhost**: the
   requirements name Go 1.26 for the host-side provisioning; the CA section
   says the four CA files are managed material; a port table lists every
