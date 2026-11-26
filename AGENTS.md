@@ -40,4 +40,6 @@ credential), read [docs/debugging-eudi-wallet.md](docs/debugging-eudi-wallet.md)
 
 Write PR descriptions with the sections of `.github/pull_request_template.md`,
 also when you pass the body on the command line (`gh pr create --body`).
+Show before and after in Solution: Mermaid diagrams for flow and state changes
+(they render on GitHub and GitLab), screenshots for UI changes.
 Issues follow `.github/ISSUE_TEMPLATE/`.

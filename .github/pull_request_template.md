@@ -6,13 +6,35 @@
 
 <!-- What changed and how it fixes the problem. Name each demo shortcut and what a
      real deployment would need instead, and each open choice a standard leaves
-     (with its risk). Add the smallest visual that makes it clear, when one helps
-     (a ```mermaid diagram, a table, a screenshot). -->
+     (with its risk).
+
+     Always show before and after, in the form that fits:
+     - UI change: screenshots side by side.
+     - Behaviour, flow or state change: a Mermaid diagram of the old and the new
+       situation (sequenceDiagram for flows between services, stateDiagram-v2 for
+       state, flowchart or classDiagram for structure). GitHub and GitLab render it.
+     - Nothing to compare (typo, dependency bump, CI config):
+       write "No visual comparison: <reason>". Don't leave it out.
+
+     Example, screenshots:
+
+     | Before | After |
+     |---|---|
+     | ![Before](./before.png) | ![After](./after.png) |
+
+     Example, flow (one block for before, one for after):
+
+     ```mermaid
+     sequenceDiagram
+         Wallet->>Verifier: presentation
+         Verifier-->>Wallet: accepted
+     ```
+-->
 
 ## Evidence
 
-<!-- Before and after: a screenshot or real output (command, test run, curl). Not a
-     description of it. Docs-only: a rendered link or "n/a".
+<!-- Proof that the after state works: a screenshot of the result, test or command
+     output, or a demo step. Real output, not a description of it.
      Screenshot from the command line (gh 2.105+): gh pr edit --attach './after.png#After'
      appends it; a ![After](./after.png) in a body passed in the same command is replaced
      by the uploaded image. -->
