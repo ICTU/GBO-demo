@@ -15,6 +15,9 @@ what to log, through [`../ldv-client`](../ldv-client/AGENTS.md).
 - The FSC read listener (`NewFSCReadHandler`) has no auth of its own: only the
   Inway may reach it, and its body check mirrors the PDP rule `LDV_READ_FSC` in
   `policies/authz.rego`. Change both together.
+- A register belongs to a Verantwoordelijke, not to a logbook: the delivery
+  logbooks (`logboek-levering-*`) load their source's whole register, so they
+  accept any of its activities, not only the delivery activity.
 
 ## Patterns
 
@@ -49,13 +52,6 @@ portal: `curl -s http://localhost:9407/ldv/<trace-id> | jq`.
   [#317](https://github.com/ICTU/GBO-demo/pull/317).
 - Token-free reduced read over FSC, capped at 500:
   [#705](https://github.com/ICTU/GBO-demo/pull/705).
-
-## Open questions
-
-- `ldv.Query` says "exactly one" selector; `normalize` accepts several. Which is
-  intended?
-- `logboek-levering-*` load the source's full register, so accept all its
-  activities. Intended?
 
 ## Links
 
