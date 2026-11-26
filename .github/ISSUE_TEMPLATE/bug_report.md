@@ -27,6 +27,11 @@ labels: bug
 
 <!-- What this issue does not cover. -->
 
+## Related GBO-TO IDs (optional)
+
+<!-- Requirement IDs from the technical design (https://github.com/ICTU/GBO-TO)
+     this issue touches: REQ-…, SL-…, F-…, or links to them. -->
+
 ## Environment
 
 - OS + arch:

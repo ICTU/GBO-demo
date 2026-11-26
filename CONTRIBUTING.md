@@ -8,6 +8,7 @@ Please use GitHub Issues for bug reports and feature discussions, with the bug r
 
 - Current and wanted behaviour, in terms of behaviour and contracts (API responses, flow steps, UI results), not file paths
 - Acceptance criteria that can each be checked on their own, and what is out of scope (for bugs: if you know them)
+- Related GBO-TO requirement IDs (REQ-, SL-, F-), if you know them
 - For bugs: how to reproduce it and your environment (OS, Docker version)
 
 For security issues, see [SECURITY.md](SECURITY.md) — please do **not** open a public issue.
