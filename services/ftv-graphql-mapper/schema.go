@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
@@ -62,6 +63,28 @@ func LoadSchema(sdl string) (*Schema, error) {
 	}
 	sum := sha256.Sum256([]byte(sdl))
 	return &Schema{schema: s, Digest: "sha256:" + hex.EncodeToString(sum[:])}, nil
+}
+
+// FieldsOfScalar returns the fields of the schema's object and interface
+// types whose value is the named scalar, lists of it included, as
+// ParentType.field keys in sorted order: the keys a rule covers them by.
+func (s *Schema) FieldsOfScalar(scalar string) []string {
+	var keys []string
+	for name, def := range s.schema.Types {
+		if def.BuiltIn || strings.HasPrefix(name, "__") {
+			continue
+		}
+		if def.Kind != ast.Object && def.Kind != ast.Interface {
+			continue
+		}
+		for _, f := range def.Fields {
+			if !strings.HasPrefix(f.Name, "__") && f.Type.Name() == scalar {
+				keys = append(keys, name+"."+f.Name)
+			}
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // checkOneOf applies the type validation of a OneOf Input Object: every

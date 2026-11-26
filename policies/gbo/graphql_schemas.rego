@@ -10,3 +10,12 @@ digests := {
 	"brp": "sha256:a7c8a24594ef5c886dbfbbf0fe45a93bbca2f2c99fda2a9e5ca03212579521b3",
 	"lvg": "sha256:b4ddfbe4e60d24f9c83ac35aa1fb055a5894d531fd37e3f5372d312f9acc9d3b",
 }
+
+# Per service, the fields whose value is a BSN (scalar BSN), as the
+# ParentType.field keys a rule covers. A consent rule must cover none of
+# them: the consumer holds no identifier of the citizen (engine_test.rego).
+bsn_fields := {
+	"bri": {"IngeschrevenPersoon.bsn"},
+	"brp": {"IngeschrevenPersoon.bsn", "Ingezetene.bsn", "NietIngezetene.bsn"},
+	"lvg": set(),
+}

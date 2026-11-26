@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Regenerates policies/gbo/graphql_schemas.rego: the digest of the
 # GraphQL schema the PDP loads per FSC service, as named in
-# schemas/pdp-mirror/services.json. The schemas travel with the PDP image,
-# so the policy bundle pins them. Run after changing a schema or the
-# manifest. CI checks freshness.
+# schemas/pdp-mirror/services.json, and the fields of each schema that
+# return a BSN. The schemas travel with the PDP image, so the policy
+# bundle pins them. Run after changing a schema or the manifest. CI checks
+# freshness.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
