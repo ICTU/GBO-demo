@@ -14,7 +14,7 @@
       ],
       "categorieen_persoonsgegevens": [
         "Portaalgebonden subjectverwijzing",
-        "Versleuteld pseudoniem en versleutelde identiteit per bron in het ondertekende toestemmingstoken",
+        "Versleuteld pseudoniem en versleutelde identiteit per bron in het ondertekende toestemmingstoken; bij een toestemming via het pushed-authorization-verzoek ook bewaard bij de toestemming, zolang die loopt, voor het vernieuwen van het bewijs (het register kan ze niet lezen)",
         "Reikwijdte, doel en geldigheidsduur van de toestemming"
       ],
       "ontvangers": [
@@ -64,6 +64,25 @@
       "categorieen_persoonsgegevens": [
         "Portaalgebonden subjectverwijzing",
         "Toestemmingsgegevens"
+      ]
+    },
+    {
+      "id": "gbo-toestemmingsbewijs-vernieuwen",
+      "version": "v1",
+      "name": "Vernieuwen van het bewijs van een toestemming",
+      "doel": "Het ondertekenen van een nieuw, kortlevend bewijs van een lopende toestemming voor de dienstverlener (of zijn integrator) met een refresh token, zodat die toegang houdt zolang de toestemming geldt zonder dat de burger opnieuw inlogt, en een bewijs niet langer geldig is dan nodig.",
+      "grondslag": "Toestemming van de betrokkene; het vernieuwen van het bewijs is noodzakelijk voor de uitvoering van de voorziening.",
+      "categorieen_betrokkenen": [
+        "Burgers met een lopende toestemming"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Portaalgebonden subjectverwijzing",
+        "Versleuteld pseudoniem en versleutelde identiteit per bron, zoals bij de toestemming bewaard, in het ondertekende toestemmingstoken",
+        "Reikwijdte en geldigheidsduur van de toestemming"
+      ],
+      "ontvangers": [
+        "De client die de toestemming aanvroeg (de dienstverlener of zijn integrator)",
+        "De bronhouder, via het ondertekende toestemmingstoken"
       ]
     },
     {

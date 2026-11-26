@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"consent-register/logbookreader"
+	"consent-register/refresh"
 	"consent-register/usageindex"
 	"consent-register/uses"
 
@@ -30,15 +32,21 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
 
-type ScopeEntry struct {
-	Bronhouder      string   `json:"bronhouder"`
-	ScopeID         string   `json:"scope_id"`
-	ConsentedFields []string `json:"consented_fields"`
-}
+// ScopeEntry is one source's part of a consent. It lives in the refresh core,
+// which signs it again.
+type ScopeEntry = refresh.ScopeEntry
 
-// Consent stores only the consent-portal-specific subject reference. The
-// encrypted values per party are accepted transiently while issuing the signed
-// consent token, but are never assigned to this persisted model.
+// Consent names the citizen only by the consent-portal-specific subject
+// reference.
+//
+// A consent given through the pushed authorization flow can be refreshed: the
+// register then also keeps the encrypted values per party that the first proof
+// carried, the SHA-256 of the refresh token, and the FSC peer of the client
+// the token was issued to (package refresh). The register cannot read the
+// values. It keeps them only while the consent runs: revoking wipes them, and
+// so does the first refresh refused after valid_until. None of the three is
+// part of any answer; the values leave the register only inside a signed
+// proof.
 type Consent struct {
 	ConsentID        string       `json:"consent_id"`
 	Status           string       `json:"status"`
@@ -49,6 +57,18 @@ type Consent struct {
 	UseCase          string       `json:"use_case"`
 	CreatedAt        time.Time    `json:"created_at"`
 	ValidUntil       time.Time    `json:"valid_until"`
+
+	// EncryptedSubject is the JSON of the encrypted values per party, kept
+	// only for a consent with a refresh token.
+	EncryptedSubject json.RawMessage `json:"-"`
+	RefreshTokenHash []byte          `json:"-"`
+	ClientPeer       string          `json:"-"`
+}
+
+// forgetRefresh wipes what a consent keeps only for a refresh.
+func (c *Consent) forgetRefresh() {
+	c.EncryptedSubject = nil
+	c.RefreshTokenHash = nil
 }
 
 // defaultValiditySeconds is the consent lifetime when the request does not
@@ -80,6 +100,10 @@ type config struct {
 	SigningKeyID  string
 	TokenIssuer   string
 	TokenAudience string
+	// ProofLifetime bounds how long one consent proof is valid
+	// (CONSENT_PROOF_LIFETIME, a duration such as 5m). Zero, the default,
+	// means a proof is valid until its consent ends.
+	ProofLifetime time.Duration
 	// UsageIndexURL is the register Outway's grant link for the lookup
 	// service of the data usage index. Without it the register answers
 	// every uses request with the index-unavailable notice.
@@ -136,6 +160,15 @@ func loadConfig() (config, error) {
 	if cfg.Store == storePostgres && cfg.SigningKeyPath == "" {
 		return config{}, errors.New("CONSENT_SIGNING_KEY_PATH is required with a persistent consent store")
 	}
+	if value := os.Getenv("CONSENT_PROOF_LIFETIME"); value != "" {
+		lifetime, err := time.ParseDuration(value)
+		// A proof's exp is in whole seconds, so a shorter lifetime
+		// would give a proof that has expired when it is issued.
+		if err != nil || lifetime < 0 || (lifetime > 0 && lifetime < time.Second) {
+			return config{}, fmt.Errorf("CONSENT_PROOF_LIFETIME must be 0 or a duration of at least 1s such as 5m, not %q", value)
+		}
+		cfg.ProofLifetime = lifetime
+	}
 	return cfg, nil
 }
 
@@ -150,6 +183,8 @@ type Store struct {
 	mu          sync.RWMutex
 	consents    map[string]*Consent
 	polymorphic map[string]Polymorphic
+	// byRefreshToken maps the hex SHA-256 of a refresh token to its consent.
+	byRefreshToken map[string]string
 	// outbox holds LDV records awaiting delivery, alongside the consents so
 	// the two are written under one lock — this store's equivalent of the
 	// transaction the Postgres one uses.
@@ -178,7 +213,17 @@ type ConsentStore interface {
 	Get(ctx context.Context, consentID string) (*Consent, bool, error)
 	// Revoke revokes a consent and stores its record in one transaction. The
 	// record is built from the revoked consent, hence the function.
+	//
+	// The same transaction wipes what the consent keeps for a refresh: its
+	// encrypted values and its refresh token hash.
 	Revoke(ctx context.Context, consentID string, record func(*Consent) ([]byte, error)) (*Consent, bool, error)
+
+	// ByRefreshToken returns the consent whose refresh token has this
+	// SHA-256, with what it keeps for a refresh.
+	ByRefreshToken(ctx context.Context, tokenHash []byte) (*Consent, bool, error)
+	// ForgetRefresh wipes the encrypted values and the refresh token hash of
+	// a consent.
+	ForgetRefresh(ctx context.Context, consentID string) error
 
 	// AppendRecord stores a record with nothing to be atomic with — the
 	// operations that read rather than mutate.
@@ -217,7 +262,11 @@ type OutboxEntry struct {
 }
 
 func NewStore() *Store {
-	return &Store{consents: make(map[string]*Consent), polymorphic: make(map[string]Polymorphic)}
+	return &Store{
+		consents:       make(map[string]*Consent),
+		polymorphic:    make(map[string]Polymorphic),
+		byRefreshToken: make(map[string]string),
+	}
 }
 
 func (s *Store) PolymorphicFor(_ context.Context, subjectRef string) (Polymorphic, bool, error) {
@@ -243,6 +292,9 @@ func (s *Store) Create(_ context.Context, consent *Consent, record []byte) error
 	// One lock covers both, which is this store's equivalent of the
 	// transaction the Postgres one uses.
 	s.consents[consent.ConsentID] = consent
+	if len(consent.RefreshTokenHash) > 0 {
+		s.byRefreshToken[hex.EncodeToString(consent.RefreshTokenHash)] = consent.ConsentID
+	}
 	s.appendLocked(record)
 
 	return nil
@@ -340,14 +392,51 @@ func (s *Store) Revoke(_ context.Context, consentID string, record func(*Consent
 		return nil, false, nil
 	}
 
-	consent.Status = "REVOKED"
-	encoded, err := record(consent)
+	revoked := *consent
+	revoked.Status = "REVOKED"
+	revoked.forgetRefresh()
+	encoded, err := record(&revoked)
 	if err != nil {
 		return nil, false, err
 	}
+	// Under the one lock, like the record: the status, the wipe and the
+	// record change together.
+	consent.Status = "REVOKED"
+	s.forgetLocked(consent)
 	s.appendLocked(encoded)
 
 	return consent, true, nil
+}
+
+// forgetLocked wipes the values and the refresh token of a consent. The
+// caller holds the lock.
+func (s *Store) forgetLocked(consent *Consent) {
+	if len(consent.RefreshTokenHash) > 0 {
+		delete(s.byRefreshToken, hex.EncodeToString(consent.RefreshTokenHash))
+	}
+	consent.forgetRefresh()
+}
+
+// ByRefreshToken returns a copy of the consent a refresh token belongs to.
+func (s *Store) ByRefreshToken(_ context.Context, tokenHash []byte) (*Consent, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	consent, ok := s.consents[s.byRefreshToken[hex.EncodeToString(tokenHash)]]
+	if !ok {
+		return nil, false, nil
+	}
+	copied := *consent
+	return &copied, true, nil
+}
+
+// ForgetRefresh wipes the values and the refresh token of a consent.
+func (s *Store) ForgetRefresh(_ context.Context, consentID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if consent, ok := s.consents[consentID]; ok {
+		s.forgetLocked(consent)
+	}
+	return nil
 }
 
 func corsHeaders(w http.ResponseWriter) {
@@ -427,6 +516,8 @@ func newMux(store ConsentStore, issuer *ConsentIssuer, logbook *registerLogbook,
 
 	mux.HandleFunc("/subjects/", handlePolymorphic(store))
 
+	mux.HandleFunc("/proofs/refresh", handleRefresh(store, issuer, logbook))
+
 	return mux
 }
 
@@ -445,95 +536,7 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 
 		switch r.Method {
 		case http.MethodPost:
-			var req struct {
-				EncryptedSubject map[string]EncryptedSubject `json:"encrypted_subject"`
-				SubjectRef       string                      `json:"subject_ref"`
-				DienstverlenrOIN string                      `json:"dienstverlener_oin"`
-				Scopes           []string                    `json:"scopes"`
-				ScopeEntries     []ScopeEntry                `json:"scope_entries"`
-				UseCase          string                      `json:"use_case"`
-				ValiditySeconds  int                         `json:"validity_seconds"` // optional; consent lifetime
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-				return
-			}
-			if err := validateEncryptedSubject(req.EncryptedSubject); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-				return
-			}
-			if req.SubjectRef == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "subject_ref is required"})
-				return
-			}
-			if req.DienstverlenrOIN == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dienstverlener_oin is required"})
-				return
-			}
-			validity := req.ValiditySeconds
-			if validity <= 0 {
-				validity = defaultValiditySeconds
-			}
-			// When scope_entries provided, derive flat scopes list for backward compat
-			scopes := req.Scopes
-			if len(req.ScopeEntries) > 0 {
-				seen := make(map[string]bool)
-				scopes = nil
-				for _, se := range req.ScopeEntries {
-					if !seen[se.ScopeID] {
-						seen[se.ScopeID] = true
-						scopes = append(scopes, se.ScopeID)
-					}
-				}
-			}
-			now := time.Now().UTC()
-			c := &Consent{
-				ConsentID:        "c-" + uuid.New().String(),
-				Status:           "ACTIVE",
-				SubjectRef:       req.SubjectRef,
-				DienstverlenrOIN: req.DienstverlenrOIN,
-				Scopes:           scopes,
-				ScopeEntries:     req.ScopeEntries,
-				UseCase:          req.UseCase,
-				CreatedAt:        now,
-				ValidUntil:       now.Add(time.Duration(validity) * time.Second),
-			}
-			consentToken, err := issuer.Sign(*c, req.EncryptedSubject)
-			if err != nil {
-				slog.Error("sign consent token", "consent_id", c.ConsentID, "err", err.Error())
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not issue consent token"})
-				return
-			}
-			// Recording a consent is itself a Dataverwerking of the GBO
-			// voorziening. The record is built here and stored in the same
-			// transaction as the consent, so neither can exist without the
-			// other — a consent nothing logged, or a record for a consent
-			// that was never created.
-			//
-			// It names the Betrokkene by the portal-scoped reference the
-			// register stores, never by an encrypted value, which exists here
-			// only inside the signed token.
-			record, err := logbook.buildRecord(r,
-				consentGrantActivity, "dataverwerking.toestemming-verlenen",
-				c.SubjectRef, start, http.StatusCreated,
-				map[string]any{
-					"dpl.gbo.consentId": c.ConsentID,
-				})
-			if err != nil {
-				slog.Error("build consent record", "err", err.Error())
-				refuseUnlogged(w)
-				return
-			}
-			if err := store.Create(r.Context(), c, record); err != nil {
-				slog.Error("create consent", "err", err.Error())
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store consent"})
-				return
-			}
-
-			writeJSON(w, http.StatusCreated, struct {
-				*Consent
-				ConsentToken string `json:"consent_token"`
-			}{Consent: c, ConsentToken: consentToken})
+			createConsent(w, r, store, issuer, logbook, start)
 
 		case http.MethodGet:
 			// GET /consents?subject_ref=<portal-pseudonym>&scope=<scope>&status=<status>
@@ -583,6 +586,132 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		}
 	}
+}
+
+// createConsent records a consent and issues its first proof: POST /consents.
+//
+// When the request names the FSC peer of the client (client_peer, the pushed
+// authorization flow), the answer also carries a refresh token for that peer,
+// and the consent keeps the encrypted values so that a refresh can sign them
+// again. Without it (the direct developer API) nothing is kept for a refresh.
+func createConsent(w http.ResponseWriter, r *http.Request, store ConsentStore, issuer *ConsentIssuer, logbook *registerLogbook, start time.Time) {
+	var req struct {
+		EncryptedSubject map[string]EncryptedSubject `json:"encrypted_subject"`
+		SubjectRef       string                      `json:"subject_ref"`
+		DienstverlenrOIN string                      `json:"dienstverlener_oin"`
+		Scopes           []string                    `json:"scopes"`
+		ScopeEntries     []ScopeEntry                `json:"scope_entries"`
+		UseCase          string                      `json:"use_case"`
+		ValiditySeconds  int                         `json:"validity_seconds"` // optional; consent lifetime
+		// ClientPeer is the FSC peer the refresh token is bound to: the
+		// client that pushed the request and redeems the code. Optional.
+		ClientPeer string `json:"client_peer"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := validateEncryptedSubject(req.EncryptedSubject); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if req.SubjectRef == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "subject_ref is required"})
+		return
+	}
+	if req.DienstverlenrOIN == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dienstverlener_oin is required"})
+		return
+	}
+	if req.ClientPeer != "" && !fscPeerIDPattern.MatchString(req.ClientPeer) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "client_peer is not an FSC peer ID of 20 characters"})
+		return
+	}
+	validity := req.ValiditySeconds
+	if validity <= 0 {
+		validity = defaultValiditySeconds
+	}
+	// When scope_entries provided, derive flat scopes list for backward compat
+	scopes := req.Scopes
+	if len(req.ScopeEntries) > 0 {
+		seen := make(map[string]bool)
+		scopes = nil
+		for _, se := range req.ScopeEntries {
+			if !seen[se.ScopeID] {
+				seen[se.ScopeID] = true
+				scopes = append(scopes, se.ScopeID)
+			}
+		}
+	}
+	now := time.Now().UTC()
+	c := &Consent{
+		ConsentID:        "c-" + uuid.New().String(),
+		Status:           "ACTIVE",
+		SubjectRef:       req.SubjectRef,
+		DienstverlenrOIN: req.DienstverlenrOIN,
+		Scopes:           scopes,
+		ScopeEntries:     req.ScopeEntries,
+		UseCase:          req.UseCase,
+		CreatedAt:        now,
+		ValidUntil:       now.Add(time.Duration(validity) * time.Second),
+	}
+	var refreshToken string
+	if req.ClientPeer != "" {
+		token, hash, err := refresh.NewToken()
+		if err != nil {
+			slog.Error("issue refresh token", "consent_id", c.ConsentID, "err", err.Error())
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not issue refresh token"})
+			return
+		}
+		values, err := json.Marshal(req.EncryptedSubject)
+		if err != nil {
+			slog.Error("encode encrypted subject", "consent_id", c.ConsentID, "err", err.Error())
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store consent"})
+			return
+		}
+		refreshToken = token
+		c.RefreshTokenHash = hash
+		c.ClientPeer = req.ClientPeer
+		c.EncryptedSubject = values
+	}
+	consentToken, expiresAt, err := issuer.Sign(*c, req.EncryptedSubject)
+	if err != nil {
+		slog.Error("sign consent token", "consent_id", c.ConsentID, "err", err.Error())
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not issue consent token"})
+		return
+	}
+	// Recording a consent is itself a Dataverwerking of the GBO
+	// voorziening. The record is built here and stored in the same
+	// transaction as the consent, so neither can exist without the
+	// other — a consent nothing logged, or a record for a consent
+	// that was never created.
+	//
+	// It names the Betrokkene by the portal-scoped reference the
+	// register stores, never by an encrypted value.
+	record, err := logbook.buildRecord(r,
+		consentGrantActivity, "dataverwerking.toestemming-verlenen",
+		c.SubjectRef, start, http.StatusCreated,
+		map[string]any{
+			"dpl.gbo.consentId": c.ConsentID,
+		})
+	if err != nil {
+		slog.Error("build consent record", "err", err.Error())
+		refuseUnlogged(w)
+		return
+	}
+	if err := store.Create(r.Context(), c, record); err != nil {
+		slog.Error("create consent", "err", err.Error())
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store consent"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, struct {
+		*Consent
+		ConsentToken string `json:"consent_token"`
+		// ExpiresAt is the exp of the proof, so a caller need not parse it.
+		ExpiresAt    time.Time `json:"expires_at"`
+		RefreshToken string    `json:"refresh_token,omitempty"`
+	}{Consent: c, ConsentToken: consentToken, ExpiresAt: expiresAt, RefreshToken: refreshToken})
 }
 
 // handleConsentByID serves a single consent: its detail and its revocation.

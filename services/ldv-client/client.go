@@ -451,6 +451,17 @@ func (c *Client) ForeignProcessor(r *http.Request) string {
 	return ""
 }
 
+// PeerProcessor is ForeignProcessor for a peer the caller names explicitly:
+// a component reached on its own network by a service that took the FSC
+// request, which passes the peer on. Empty for a value that is not an FSC
+// Peer ID.
+func (c *Client) PeerProcessor(peerID string) string {
+	if !peerIDPattern.MatchString(peerID) {
+		return ""
+	}
+	return c.peerURIBase + "/" + peerID
+}
+
 // LogFailure records why a request was refused. The record itself did not
 // land, so this line is the only trace of the attempt.
 func LogFailure(name string, err error) {

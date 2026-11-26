@@ -85,6 +85,9 @@ type ConsentIssuer struct {
 	kid      string
 	issuer   string
 	audience string
+	// lifetime bounds how long one proof is valid. Zero means a proof is
+	// valid until the consent ends.
+	lifetime time.Duration
 	now      func() time.Time
 }
 
@@ -104,7 +107,7 @@ func NewConsentIssuer(cfg config) (*ConsentIssuer, error) {
 	}
 	return &ConsentIssuer{
 		key: key, kid: kid, issuer: cfg.TokenIssuer,
-		audience: cfg.TokenAudience, now: time.Now,
+		audience: cfg.TokenAudience, lifetime: cfg.ProofLifetime, now: time.Now,
 	}, nil
 }
 
@@ -134,8 +137,18 @@ func loadConsentSigningKey(path string) (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
-func (i *ConsentIssuer) Sign(consent Consent, subject map[string]EncryptedSubject) (string, error) {
+// Sign issues a proof for a consent and returns it with its expiry. The
+// expiry is the earlier of now plus the proof lifetime and the end of the
+// consent; the claim valid_until is always the end of the consent, so a
+// source still sees when the consent itself ends.
+func (i *ConsentIssuer) Sign(consent Consent, subject map[string]EncryptedSubject) (string, time.Time, error) {
 	now := i.now().UTC()
+	expiresAt := consent.ValidUntil.UTC()
+	if i.lifetime > 0 && now.Add(i.lifetime).Before(expiresAt) {
+		expiresAt = now.Add(i.lifetime)
+	}
+	// A JWT carries whole seconds; the expiry returned is the one signed.
+	expiresAt = expiresAt.Truncate(time.Second)
 	claims := ConsentClaims{
 		ConsentID:        consent.ConsentID,
 		EncryptedSubject: subject,
@@ -146,7 +159,7 @@ func (i *ConsentIssuer) Sign(consent Consent, subject map[string]EncryptedSubjec
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    i.issuer,
 			Audience:  jwt.ClaimStrings{i.audience},
-			ExpiresAt: jwt.NewNumericDate(consent.ValidUntil),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			NotBefore: jwt.NewNumericDate(now),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ID:        uuid.NewString(),
@@ -155,7 +168,11 @@ func (i *ConsentIssuer) Sign(consent Consent, subject map[string]EncryptedSubjec
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["kid"] = i.kid
 	token.Header["typ"] = consentTokenType
-	return token.SignedString(i.key)
+	signed, err := token.SignedString(i.key)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return signed, expiresAt, nil
 }
 
 func (i *ConsentIssuer) JWKS() map[string]any {

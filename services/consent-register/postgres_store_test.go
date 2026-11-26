@@ -2,9 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
+	"reflect"
 	"testing"
 	"time"
+
+	"consent-register/refresh"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -239,5 +244,115 @@ func TestPostgreSQLStoreKeepsThePolymorphicValues(t *testing.T) {
 	got, ok, err := reopened.PolymorphicFor(ctx, subjectRef)
 	if err != nil || !ok || got != (Polymorphic{PI: "signed-PI", PP: "signed-PP"}) {
 		t.Errorf("after reopening: %+v, ok %v, err %v; want the first pair", got, ok, err)
+	}
+}
+
+// A consent with a refresh token keeps its values, hash and peer across a
+// reopened store, finds them by the hash, and loses the values and the hash
+// on revocation (in the same transaction as the status) or when forgotten.
+func TestPostgreSQLStoreKeepsAndForgetsTheRefreshValues(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	store, err := NewPostgreSQLStore(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("create PostgreSQL store: %v", err)
+	}
+	t.Cleanup(store.Close)
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	values := []byte(`{"99999999900000000200": {"pseudonym": {"value": "cHNldWRv", "key_set_version": 1}}}`)
+	newConsent := func(token string) *Consent {
+		consent := &Consent{
+			ConsentID: "test-refresh-" + uuid.NewString(), Status: "ACTIVE", SubjectRef: "EP-refresh",
+			DienstverlenrOIN: "99999999900000000300", Scopes: []string{"inkomen:read"},
+			ScopeEntries: []ScopeEntry{}, UseCase: "hypotheek", CreatedAt: now, ValidUntil: now.Add(time.Hour),
+			EncryptedSubject: values, RefreshTokenHash: refresh.HashToken(token), ClientPeer: "99999999900000000300",
+		}
+		t.Cleanup(func() {
+			if _, err := store.pool.Exec(ctx, "DELETE FROM consents WHERE consent_id = $1", consent.ConsentID); err != nil {
+				t.Errorf("cleanup: %v", err)
+			}
+		})
+		if err := store.Create(ctx, consent, nil); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		return consent
+	}
+	revokedOne := newConsent("token-revoke-" + uuid.NewString())
+	forgottenToken := "token-forget-" + uuid.NewString()
+	forgottenOne := newConsent(forgottenToken)
+	plain := &Consent{
+		ConsentID: "test-plain-" + uuid.NewString(), Status: "ACTIVE", SubjectRef: "EP-refresh",
+		DienstverlenrOIN: "99999999900000000300", Scopes: []string{"inkomen:read"}, ScopeEntries: []ScopeEntry{},
+		UseCase: "hypotheek", CreatedAt: now, ValidUntil: now.Add(time.Hour),
+	}
+	t.Cleanup(func() { _, _ = store.pool.Exec(ctx, "DELETE FROM consents WHERE consent_id = $1", plain.ConsentID) })
+	if err := store.Create(ctx, plain, nil); err != nil {
+		t.Fatalf("create without refresh values: %v", err)
+	}
+
+	reopened, err := NewPostgreSQLStore(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(reopened.Close)
+	found, ok, err := reopened.ByRefreshToken(ctx, revokedOne.RefreshTokenHash)
+	if err != nil || !ok {
+		t.Fatalf("by refresh token: %v %v", ok, err)
+	}
+	var want, got map[string]any
+	_ = json.Unmarshal(values, &want)
+	if err := json.Unmarshal(found.EncryptedSubject, &got); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("kept values = %s, want %s", found.EncryptedSubject, values)
+	}
+	if found.ConsentID != revokedOne.ConsentID || found.ClientPeer != revokedOne.ClientPeer || found.Status != "ACTIVE" {
+		t.Fatalf("found %+v", found)
+	}
+	// A consent without a refresh token keeps nothing for one.
+	assertRefreshColumns(t, reopened, plain.ConsentID, false)
+
+	// A revocation whose record fails rolls back: nothing is wiped.
+	if _, _, err := reopened.Revoke(ctx, revokedOne.ConsentID, func(*Consent) ([]byte, error) {
+		return nil, errors.New("record failed")
+	}); err == nil {
+		t.Fatal("revoke without a record succeeded")
+	}
+	assertRefreshColumns(t, reopened, revokedOne.ConsentID, true)
+
+	revoked, ok, err := reopened.Revoke(ctx, revokedOne.ConsentID, noRecord)
+	if err != nil || !ok || revoked.Status != "REVOKED" {
+		t.Fatalf("revoke: %+v %v %v", revoked, ok, err)
+	}
+	assertRefreshColumns(t, reopened, revokedOne.ConsentID, false)
+	if _, ok, err := reopened.ByRefreshToken(ctx, revokedOne.RefreshTokenHash); err != nil || ok {
+		t.Fatalf("revoked token still found: %v %v", ok, err)
+	}
+
+	if err := reopened.ForgetRefresh(ctx, forgottenOne.ConsentID); err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+	assertRefreshColumns(t, reopened, forgottenOne.ConsentID, false)
+	if _, ok, _ := reopened.ByRefreshToken(ctx, refresh.HashToken(forgottenToken)); ok {
+		t.Fatal("forgotten token still found")
+	}
+	if still, _, _ := reopened.Get(ctx, forgottenOne.ConsentID); still.Status != "ACTIVE" {
+		t.Fatalf("forgetting changed the status to %q", still.Status)
+	}
+}
+
+// assertRefreshColumns checks whether a consent row holds values and a hash.
+func assertRefreshColumns(t *testing.T, store *PostgreSQLStore, consentID string, want bool) {
+	t.Helper()
+	var hasValues, hasHash bool
+	if err := store.pool.QueryRow(context.Background(), `
+		SELECT encrypted_subject IS NOT NULL, refresh_token_hash IS NOT NULL FROM consents WHERE consent_id = $1
+	`, consentID).Scan(&hasValues, &hasHash); err != nil {
+		t.Fatalf("read refresh columns: %v", err)
+	}
+	if hasValues != want || hasHash != want {
+		t.Fatalf("consent %s: values %v, hash %v; want %v", consentID, hasValues, hasHash, want)
 	}
 }

@@ -169,6 +169,20 @@ func TestForeignProcessorNamesTheCallingPeer(t *testing.T) {
 	}
 }
 
+// A peer passed on explicitly gets the same URL as one read from FSC.
+func TestPeerProcessorNamesAPeerPassedOn(t *testing.T) {
+	client, err := New(testConfig("http://logboek:4016"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := client.PeerProcessor("AAAABBBBCCCCDDDDEEEE"), DefaultPeerURIBase+"/AAAABBBBCCCCDDDDEEEE"; got != want {
+		t.Errorf("PeerProcessor = %q, want %q", got, want)
+	}
+	if got := client.PeerProcessor("not a peer"); got != "" {
+		t.Errorf("PeerProcessor of a non-peer = %q, want empty", got)
+	}
+}
+
 // Without a peer-shaped claim, the grant hash is the one thing about the
 // caller this side can actually verify.
 func TestForeignProcessorFallsBackToTheGrantHash(t *testing.T) {
