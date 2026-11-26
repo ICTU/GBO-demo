@@ -111,7 +111,7 @@ sequenceDiagram
     Citizen->>Portal: Log in (start-URL vijf minuten in een cookie)
     Portal->>Portal: Resolve: bind de referentie aan de burger
     Portal-->>Citizen: Naam en doel uit de registratie, data sets, valid_until
-    Citizen->>Portal: Geef toestemming of weiger
+    Citizen->>Portal: Bevestig dat de informatie gelezen is, geef toestemming of weiger
 
     opt Toestemming
         Portal->>Portal: subject_ref = HMAC van het BSN
@@ -165,7 +165,8 @@ bereikt de burger niet.
 | PAR | 400 | `invalid_request` | `RETURN_URL_NOT_REGISTERED` | `redirect_uri` is geen geregistreerde return location (exacte vergelijking) |
 | PAR | 500 | `server_error` | | Interne fout: het verzoek kan niet worden bewaard |
 | Resolve, beslissing | 401 | | | Geen of ongeldig portaaltoken van de burger |
-| Beslissing | 400 | | | De body is geen `{"decision": "grant" of "deny", "scopes": [...]}` |
+| Beslissing | 400 | | | De body is geen `{"decision": "grant" of "deny", "scopes": [...], "information_confirmed": true}` |
+| Beslissing | 400 | | `CONFIRMATION_MISSING` | Een `grant` zonder `"information_confirmed": true`: de burger heeft niet bevestigd de informatie over dienstverlener, doel, gegevens en looptijd te hebben gezien. Er komt geen consent en geen aanroep van BSNk; de referentie blijft bruikbaar |
 | Beslissing | 400 | | | Een `grant` zonder data sets, met een lege data set of met een data set die dubbel genoemd wordt; de referentie blijft bruikbaar |
 | Resolve, beslissing | 404 | | `REQUEST_URI_UNKNOWN` | Onbekende referentie |
 | Resolve, beslissing | 410 | | `REQUEST_URI_EXPIRED` | Verlopen referentie (`PAR_REQUEST_LIFETIME`, standaard 10 minuten) |
@@ -223,12 +224,14 @@ return location:
   pushed request over: ook een inactieve of niet-geregistreerde
   dienstverlener krijgt er een consent mee, en wie een portal-login heeft,
   kan er via de `/portal-api`-proxy van het portaal een token voor elke
-  `dienstverlener_oin` mee laten maken. Het developer portal bewaart de
-  tokens die het zo krijgt in `sessionStorage`. De belofte hierboven dat het
-  token nooit in een URL of in browser storage staat, geldt dus voor de
-  stroom van de dienstverlener, niet voor deze API. Een echte uitrol heeft
-  zo'n endpoint niet voor tokens van burgers, of beperkt het tot de
-  ontwikkelomgeving.
+  `dienstverlener_oin` mee laten maken. Ook deze API weigert een consent
+  zonder `"information_confirmed": true` met `CONFIRMATION_MISSING`; het
+  developer portal stuurt die bevestiging namens de burger mee. Het
+  developer portal bewaart de tokens die het zo krijgt in `sessionStorage`.
+  De belofte hierboven dat het token nooit in een URL of in browser storage
+  staat, geldt dus voor de stroom van de dienstverlener, niet voor deze API.
+  Een echte uitrol heeft zo'n endpoint niet voor tokens van burgers, of
+  beperkt het tot de ontwikkelomgeving.
 
 Het token bevat de bindings waarop de PDP later beslist:
 

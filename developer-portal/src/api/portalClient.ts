@@ -38,6 +38,10 @@ export async function issuanceFlow(
       scopes: payload.scopes,
       validity_seconds: payload.validity_seconds ?? 7776000,
       use_case: payload.use_case,
+      // Demo shortcut: the developer portal stands in for the citizen, who
+      // confirms on the consent screen having read the information. The
+      // backend refuses a consent without it (CONFIRMATION_MISSING).
+      information_confirmed: true,
     }),
   })
   if (!consentRes.ok) {

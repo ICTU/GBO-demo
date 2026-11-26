@@ -10,7 +10,7 @@ import (
 func TestTheOwnerSeesTheUsesOfAConsent(t *testing.T) {
 	p, _, store := testPortal(t, nil)
 	ctx := context.Background()
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestTheOwnerSeesTheUsesOfAConsent(t *testing.T) {
 func TestTheUsesOfAnotherCitizensConsentAreNotFound(t *testing.T) {
 	p, _, store := testPortal(t, nil)
 	ctx := context.Background()
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}

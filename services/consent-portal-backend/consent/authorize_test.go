@@ -68,7 +68,9 @@ func resolve(t *testing.T, p *Portal, uri string) {
 	}
 }
 
-func grant(scopes ...string) Decision { return Decision{Grant: true, Scopes: scopes} }
+func grant(scopes ...string) Decision {
+	return Decision{Grant: true, Scopes: scopes, InformationConfirmed: true}
+}
 
 func TestResolveRequestShowsTheRegistration(t *testing.T) {
 	p, clock, _, _ := flowPortal(t)

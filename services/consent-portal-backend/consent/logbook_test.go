@@ -52,8 +52,9 @@ func TestGiveConsentLogsThePseudonymisation(t *testing.T) {
 	portal, _, logbook := portalWithLogbook(t)
 
 	if _, err := portal.GiveConsent(context.Background(), citizenBSN, GiveInput{
-		DienstverlenerOIN: "99999999900000001400",
-		Scopes:            []string{"bd:ib:2025"},
+		DienstverlenerOIN:    "99999999900000001400",
+		Scopes:               []string{"bd:ib:2025"},
+		InformationConfirmed: true,
 	}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -90,8 +91,9 @@ func TestOnlyTheRecordOfACallToBSNkPointsAtBSNk(t *testing.T) {
 	portal.PseudonymsLogbook = "https://example.test/bsnk"
 
 	if _, err := portal.GiveConsent(context.Background(), citizenBSN, GiveInput{
-		DienstverlenerOIN: "99999999900000001400",
-		Scopes:            []string{"bd:ib:2025"},
+		DienstverlenerOIN:    "99999999900000001400",
+		Scopes:               []string{"bd:ib:2025"},
+		InformationConfirmed: true,
 	}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -118,8 +120,9 @@ func TestGiveConsentThatCannotBeLoggedCreatesNoConsent(t *testing.T) {
 	logbook.err = errors.New("logboek unreachable")
 
 	_, err := portal.GiveConsent(context.Background(), citizenBSN, GiveInput{
-		DienstverlenerOIN: "99999999900000001400",
-		Scopes:            []string{"bd:ib:2025"},
+		DienstverlenerOIN:    "99999999900000001400",
+		Scopes:               []string{"bd:ib:2025"},
+		InformationConfirmed: true,
 	})
 	if err == nil {
 		t.Fatal("an unlogged consent must not be granted")
@@ -153,8 +156,9 @@ func TestListAndRevokeLogTheirPseudonymisation(t *testing.T) {
 		"revoking": {
 			run: func(t *testing.T, portal *Portal, _ *memStore) error {
 				granted, err := portal.GiveConsent(context.Background(), citizenBSN, GiveInput{
-					DienstverlenerOIN: "99999999900000001400",
-					Scopes:            []string{"bd:ib:2025"},
+					DienstverlenerOIN:    "99999999900000001400",
+					Scopes:               []string{"bd:ib:2025"},
+					InformationConfirmed: true,
 				})
 				if err != nil {
 					t.Fatalf("seed a consent: %v", err)
@@ -189,8 +193,9 @@ func TestNoBSNInAnyRecordedProcessing(t *testing.T) {
 	portal, _, logbook := portalWithLogbook(t)
 
 	granted, err := portal.GiveConsent(context.Background(), citizenBSN, GiveInput{
-		DienstverlenerOIN: "99999999900000001400",
-		Scopes:            []string{"bd:ib:2025"},
+		DienstverlenerOIN:    "99999999900000001400",
+		Scopes:               []string{"bd:ib:2025"},
+		InformationConfirmed: true,
 	})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
@@ -227,8 +232,9 @@ func TestAPortalWithoutALogbookStillWorks(t *testing.T) {
 	portal, _, _ := testPortal(t, nil)
 
 	if _, err := portal.GiveConsent(context.Background(), citizenBSN, GiveInput{
-		DienstverlenerOIN: "99999999900000001400",
-		Scopes:            []string{"bd:ib:2025"},
+		DienstverlenerOIN:    "99999999900000001400",
+		Scopes:               []string{"bd:ib:2025"},
+		InformationConfirmed: true,
 	}); err != nil {
 		t.Fatalf("give consent without a logbook: %v", err)
 	}

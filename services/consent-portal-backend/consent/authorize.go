@@ -34,7 +34,17 @@ const (
 	// ReasonRequestURINotResolved: a decision on a reference the citizen
 	// has not resolved, so whose client ID was never checked.
 	ReasonRequestURINotResolved ReasonCode = "REQUEST_URI_NOT_RESOLVED"
+	// ReasonConfirmationMissing: a grant without the citizen's confirmation
+	// that they have seen who asks, for what purpose, which data and for how
+	// long. Consent must be informed, so nothing is done for it.
+	ReasonConfirmationMissing ReasonCode = "CONFIRMATION_MISSING"
 )
+
+// refuseUnconfirmed is the refusal of a grant the citizen did not confirm.
+func refuseUnconfirmed() *Refusal {
+	return refuse(ReasonConfirmationMissing,
+		"the citizen has not confirmed seeing who asks, the purpose, the data and the validity")
+}
 
 // DefaultConsentValidity is how long a consent holds when the provider
 // pushed no valid_until: the same 90 days the portal's consent screen uses.
@@ -80,10 +90,14 @@ func (p *Portal) ResolveRequest(_ context.Context, citizen BSN, requestURI, clie
 }
 
 // Decision is the citizen's answer to a request: grant consent for Scopes,
-// a non-empty subset of the requested data sets, or refuse it.
+// a non-empty subset of the requested data sets, or refuse it. A grant
+// holds only with InformationConfirmed: the citizen confirmed seeing who
+// asks, the purpose, the data and the validity. A refusal needs no
+// confirmation.
 type Decision struct {
-	Grant  bool
-	Scopes []string
+	Grant                bool
+	Scopes               []string
+	InformationConfirmed bool
 }
 
 // ErrInvalidDecision is returned for a decision that cannot be carried out,
@@ -118,6 +132,8 @@ type Decided struct {
 }
 
 // Decide records citizen's decision on the request behind requestURI. A
+// grant the citizen did not confirm is refused with ReasonConfirmationMissing
+// before anything else, and leaves the reference as it was. A
 // decision that is not valid for the request returns an error wrapping
 // ErrInvalidDecision and leaves the reference as it was; a reference that
 // cannot be used is refused as by ResolveRequest. No client ID is checked
@@ -128,6 +144,9 @@ type Decided struct {
 // OutcomeDenied, a grant gives the consent and a code (OutcomeGranted) or,
 // when the consent could not be given, OutcomeFailed.
 func (p *Portal) Decide(ctx context.Context, citizen BSN, requestURI string, decision Decision) (Decided, error) {
+	if decision.Grant && !decision.InformationConfirmed {
+		return Decided{}, refuseUnconfirmed()
+	}
 	if p.Requests == nil {
 		return Decided{}, errors.New("no request store is configured")
 	}
@@ -177,10 +196,11 @@ func (p *Portal) Decide(ctx context.Context, citizen BSN, requestURI string, dec
 	}
 	scopes := slices.Clone(decision.Scopes)
 	granted, err := p.GiveConsent(ctx, citizen, GiveInput{
-		DienstverlenerOIN: string(verified.Provider),
-		Scopes:            scopes,
-		ValiditySeconds:   max(1, int(validity.Seconds())),
-		UseCase:           verified.Purpose,
+		DienstverlenerOIN:    string(verified.Provider),
+		Scopes:               scopes,
+		ValiditySeconds:      max(1, int(validity.Seconds())),
+		UseCase:              verified.Purpose,
+		InformationConfirmed: true, // checked above
 	})
 	if err == nil {
 		// Once the consent is given, issuing its code cannot fail: the store

@@ -105,6 +105,10 @@ type GiveInput struct {
 	ValiditySeconds   int
 	UseCase           string // the dienstverlener's stated purpose; DefaultUseCase when empty
 	Trigger           string // "dev-portal" when the dev-portal drove this; narrative only
+	// InformationConfirmed is the citizen's confirmation that they have seen
+	// who asks, the purpose, the data and the validity. Without it the
+	// consent is refused with ReasonConfirmationMissing.
+	InformationConfirmed bool
 }
 
 // Granted is the result of a successful grant.
@@ -126,10 +130,17 @@ type Granted struct {
 // The service provider gets no identifier of the citizen at all: the token
 // carries values only the sources can read.
 //
+// Consent must be informed: without the citizen's confirmation that they
+// have seen the information, the grant is refused with a *Refusal before
+// anything else, so no record is made and BSNk is not called.
+//
 // The ordering here is the privacy invariant: everything that needs the BSN
 // happens first, and nothing below that line holds a BSN it could hand
 // onwards — Draft has no field that would accept one.
 func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Granted, error) {
+	if !in.InformationConfirmed {
+		return Granted{}, refuseUnconfirmed()
+	}
 	emit := p.stepEmitter(ctx, "give_consent")
 
 	// Light up the portal component first: the citizen-side flow arrives

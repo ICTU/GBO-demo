@@ -128,7 +128,14 @@ export async function resolveRequest(
   return res.json()
 }
 
-export type DecisionBody = { decision: 'grant'; scopes: string[] } | { decision: 'deny' }
+/**
+ * A grant carries information_confirmed: the citizen confirmed having seen
+ * who asks, the purpose, the data and the validity. The backend refuses a
+ * grant without it (CONFIRMATION_MISSING). A refusal needs no confirmation.
+ */
+export type DecisionBody =
+  | { decision: 'grant'; scopes: string[]; information_confirmed: true }
+  | { decision: 'deny' }
 
 /**
  * Records the citizen's decision on a pushed request:

@@ -251,7 +251,7 @@ func TestRevokeDeniedForOtherCitizen(t *testing.T) {
 	p, _, store := testPortal(t, nil)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestRevokeSucceedsForOwner(t *testing.T) {
 	p, _, store := testPortal(t, nil)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestRevokeRefusesAnExpiredConsent(t *testing.T) {
 	p, _, store := testPortal(t, nil)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", ValiditySeconds: 60})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", ValiditySeconds: 60, InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestRevokeRefusesARevokedConsent(t *testing.T) {
 	p, _, store := testPortal(t, nil)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestRevokeOfAnotherCitizensInactiveConsentIsNotOwned(t *testing.T) {
 	p, _, _ := testPortal(t, nil)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestRevokeRefusedByTheRegisterIsNotRevocable(t *testing.T) {
 	p, _, store := testPortal(t, nil)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -407,8 +407,9 @@ func TestListAnnotatesExpiredAgainstInjectedClock(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{
-		DienstverlenerOIN: "DV",
-		ValiditySeconds:   60,
+		DienstverlenerOIN:    "DV",
+		ValiditySeconds:      60,
+		InformationConfirmed: true,
 	}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -434,7 +435,7 @@ func TestListIsolatesByCitizen(t *testing.T) {
 	p, _, _ := testPortal(t, nil)
 	ctx := context.Background()
 
-	if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
+	if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
 	recs, err := p.ListConsents(ctx, BSN("222222222"))
@@ -456,8 +457,9 @@ func TestBSNNeverReachesTheRegister(t *testing.T) {
 	const bsn = "987654321"
 
 	if _, err := p.GiveConsent(context.Background(), BSN(bsn), GiveInput{
-		DienstverlenerOIN: "DV",
-		Scopes:            []string{"bd:ib:2025"},
+		DienstverlenerOIN:    "DV",
+		Scopes:               []string{"bd:ib:2025"},
+		InformationConfirmed: true,
 	}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -497,7 +499,7 @@ func TestACitizenIsActivatedOnce(t *testing.T) {
 	ctx := context.Background()
 
 	for range 2 {
-		if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
+		if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true}); err != nil {
 			t.Fatalf("give consent: %v", err)
 		}
 	}
@@ -516,7 +518,7 @@ func TestACitizenIsActivatedOnce(t *testing.T) {
 	}
 
 	// Another citizen is a first consent again.
-	if _, err := p.GiveConsent(ctx, BSN("222222222"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
+	if _, err := p.GiveConsent(ctx, BSN("222222222"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
 	if activated, _ := bsnk.calls(); activated != 2 {
@@ -530,7 +532,7 @@ func TestListingAndRevokingDoNotCallBSNk(t *testing.T) {
 	p, bsnk, _ := testPortal(t, nil)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -552,7 +554,7 @@ func TestListingAndRevokingDoNotCallBSNk(t *testing.T) {
 func TestValuesAreMadeForTheSourcesOnly(t *testing.T) {
 	p, bsnk, _ := testPortal(t, nil)
 
-	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV-OIN"}); err != nil {
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV-OIN", InformationConfirmed: true}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
 	for i, parties := range bsnk.gotParties {
@@ -570,7 +572,7 @@ func TestEverySourceGetsAPseudonymAndListedOnesAnIdentity(t *testing.T) {
 	unlisted := Party{OIN: "00000000000000000210", KeySetVersion: 20260301}
 	p.Sources = []Party{testSource, unlisted}
 
-	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
 	if len(bsnk.gotForms) != 2 || bsnk.gotForms[0] != FormPseudonym || bsnk.gotForms[1] != FormIdentity {
@@ -602,7 +604,7 @@ func TestNoSourceOnTheListGetsPseudonymsAlone(t *testing.T) {
 	p, bsnk, store := testPortal(t, nil)
 	bsnk.listed = nil
 
-	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
 	if len(bsnk.gotForms) != 1 || bsnk.gotForms[0] != FormPseudonym {
@@ -621,7 +623,7 @@ func TestTheAuthorisationListIsNotUsedOutOfDate(t *testing.T) {
 	p.Now = func() time.Time { return now }
 	p.AuthorisationListMaxAge = time.Hour
 	give := func() error {
-		_, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+		_, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 		return err
 	}
 
@@ -659,7 +661,7 @@ func TestGiveConsentNeedsASource(t *testing.T) {
 	p, bsnk, store := testPortal(t, nil)
 	p.Sources = nil
 
-	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err == nil {
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true}); err == nil {
 		t.Fatal("want an error when no source is configured")
 	}
 	if activated, _ := bsnk.calls(); activated != 0 || len(store.created) != 0 {
@@ -675,7 +677,7 @@ func TestPanickingObserverDoesNotFailGiveConsent(t *testing.T) {
 	boom := ObserverFunc(func(context.Context, Event) { panic("observer exploded") })
 	p, _, _ := testPortal(t, FanOut{boom})
 
-	granted, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent failed because of an observer: %v", err)
 	}
@@ -689,7 +691,7 @@ func TestGiveConsentEmitsPanelSteps(t *testing.T) {
 	rec := &recorder{}
 	p, _, _ := testPortal(t, rec)
 
-	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
 	want := []string{"portal_received", "pseudonymizing", "pseudonym_generated", "consent_granting", "consent_granted"}
@@ -703,7 +705,7 @@ func TestRevokeEmitsPanelSteps(t *testing.T) {
 	p, _, _ := testPortal(t, rec)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -724,7 +726,7 @@ func TestDeniedRevokeDoesNotEmitRevoked(t *testing.T) {
 	p, _, _ := testPortal(t, rec)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -746,7 +748,7 @@ func TestGiveConsentFailsWhenBSNkFails(t *testing.T) {
 	p, bsnk, store := testPortal(t, nil)
 	bsnk.err = errors.New("bsnk down")
 
-	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err == nil {
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", InformationConfirmed: true}); err == nil {
 		t.Fatal("want an error when BSNk fails")
 	}
 	// Nothing may be registered when BSNk made no value for the sources, and
@@ -764,9 +766,10 @@ func TestUseCaseFollowsTheStatedPurpose(t *testing.T) {
 	} {
 		p, _, store := testPortal(t, nil)
 		if _, err := p.GiveConsent(context.Background(), BSN("987654321"), GiveInput{
-			DienstverlenerOIN: "DV",
-			Scopes:            []string{"lvg:vbo:eigendom"},
-			UseCase:           tc.given,
+			DienstverlenerOIN:    "DV",
+			Scopes:               []string{"lvg:vbo:eigendom"},
+			UseCase:              tc.given,
+			InformationConfirmed: true,
 		}); err != nil {
 			t.Fatalf("give consent: %v", err)
 		}

@@ -7,6 +7,7 @@ import {
   START_LOGIN_ROUTE,
   START_ROUTE,
   afterFailure,
+  canGrant,
   chosenScopes,
   clearedStartCookie,
   confirmation,
@@ -287,10 +288,37 @@ test('a grant posts exactly the data sets the citizen left checked', async (t) =
   assert.deepEqual(chosenScopes(['bd:ib:2025'], { 'bd:ib:2024': true }), ['bd:ib:2025'])
 
   const calls = mockFetch(t, json({ outcome: 'granted', client_name: 'X', redirect_to: 'https://dv.example/r?code=c&state=s' }))
-  await decideRequest('tok', requestUri, { decision: 'grant', scopes: chosenScopes(requested, { 'bd:ib:2025': false }) })
+  await decideRequest('tok', requestUri, {
+    decision: 'grant',
+    scopes: chosenScopes(requested, { 'bd:ib:2025': false }),
+    information_confirmed: true,
+  })
   assert.equal(calls[0].init.method, 'POST')
   assert.equal(calls[0].init.headers.Authorization, 'Bearer tok')
-  assert.deepEqual(JSON.parse(calls[0].init.body), { decision: 'grant', scopes: ['bd:ib:2024'] })
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    decision: 'grant',
+    scopes: ['bd:ib:2024'],
+    information_confirmed: true,
+  })
+})
+
+test('"Geef toestemming" needs a data set and the confirmation that the information was read', async () => {
+  assert.equal(canGrant([], false, false), false)
+  assert.equal(canGrant(['bd:ib:2025'], false, false), false, 'not confirmed')
+  assert.equal(canGrant([], true, false), false, 'confirmed without a data set')
+  assert.equal(canGrant(['bd:ib:2025'], true, false), true, 'confirmed with a data set')
+  assert.equal(canGrant(['bd:ib:2025'], true, true), false, 'while deciding')
+
+  // The screen starts unconfirmed, uses canGrant for the button, and the
+  // confirmation is a labelled native checkbox, so keyboard and screen
+  // reader can operate it.
+  const screen = await read('pages/ToestemmingConsent.tsx')
+  assert.match(screen, /useState\(false\)/)
+  assert.match(screen, /disabled=\{!grantable\}/)
+  assert.match(screen, /<label className="confirm-card">\s*<input\s+type="checkbox"/)
+  // The grant the start page posts carries the confirmation.
+  const start = await read('pages/ToestemmingStart.tsx')
+  assert.match(start, /decision: 'grant', scopes, information_confirmed: true/)
 })
 
 test('the portal has no route that takes a consent request from the URL', async () => {

@@ -10,6 +10,7 @@ export function curlForIssuance(p: IssuancePayload): string {
     scopes: p.scopes,
     validity_seconds: p.validity_seconds ?? 7776000,
     use_case: p.use_case,
+    information_confirmed: true,
   }
   return [
     `# 1. login (BSN → JWT)`,
