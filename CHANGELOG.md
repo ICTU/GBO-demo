@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Short-lived consent proofs and a refresh token in the consent register**
+  (#647). `CONSENT_PROOF_LIFETIME` (a duration such as `5m`) bounds a proof:
+  `exp` is the earlier of now plus the lifetime and `valid_until`, which stays
+  the end of the consent. Unset (the default for now), `exp` is `valid_until`
+  as before. `POST /consents` returns `expires_at`, and, when the request
+  names `client_peer`, an opaque refresh token bound to that FSC peer. The
+  register then keeps the encrypted values per source with the consent, which
+  it cannot read and never returns, until the consent is revoked or a refresh
+  after `valid_until` is refused. The internal `POST /proofs/refresh` signs a
+  new proof of the same consent; the refresh token is not rotated and stays
+  usable until `valid_until`. Each refresh is logged as
+  `gbo-toestemmingsbewijs-vernieuwen`. The portal's token endpoint does not
+  offer the refresh grant yet.
 - **Consent flow with a pushed authorization request** (#427, #648): a
   service provider pushes its consent request to the consent portal over FSC
   (RFC 9126), the citizen decides in the toestemmingsportaal, and the
