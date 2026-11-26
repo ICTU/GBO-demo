@@ -136,9 +136,10 @@ services:
       # input.resource.attributes.graphql, from the schema of the FSC service
       # the request is for. Without it the policy denies every request.
       - PDP_REQUEST_MAPPINGS=ftvgraphql
-      # Native OpenFTV PIP pull: refresh the DvTP admission entities over a
-      # dedicated network shared only with the register.
-      - PDP_PIP_PULL_CONFIGS=/pip-pull/dvtp-onboarding.yaml
+      # The DvTP onboarding register, read by the policy on every decision
+      # that needs it (policies/gbo/register.rego), over a dedicated network
+      # shared only with the register.
+      - GBO_REGISTER_URL=http://dvtp-onboarding-register:4015/internal/openftv/participants
       # Read by the policy through opa.runtime().env (policies/gbo/
       # consent.rego): it fetches the register's verification keys and the
       # referenced consent's current status per evaluation. Any verification
@@ -166,7 +167,6 @@ services:
       # change needs a restart, and a new pin (scripts/gen-graphql-pins.sh).
       - ./schemas/pdp-mirror:/etc/gbo/ftv-graphql:ro
       - ./services/openftv-pdp/certs:/certs:ro
-      - ./services/openftv-pdp/pip-pull:/pip-pull:ro
     networks:
       - backend
       - dvtp-onboarding
@@ -180,6 +180,9 @@ services:
         condition: service_healthy
       dvtp-onboarding-register:
         condition: service_healthy
+    # The policies are loaded before the PDP serves, and it reads the
+    # onboarding register live, so it decides correctly from its first
+    # request: process health is all there is to wait for.
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       <<: *healthcheck-timing

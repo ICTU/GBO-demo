@@ -77,11 +77,11 @@ fail_unsigned() {
     echo "    docker compose logs --no-log-prefix openftv-pdp \\"
     echo "      | grep auto_sign_contract | tail -1 | jq .result.response"
     echo ""
-    echo "  ADMISSION_REGISTER_UNAVAILABLE: the admission register did not reach"
-    echo "  the PDP. Check the OpenFTV PIP pull and the onboarding register."
-    echo "  PARTY_NOT_IN_REGISTRY: the register arrived, but the peer is absent."
-    echo "  Add it at http://localhost:${GBO_PORT_DVTP_ONBOARDING_REGISTER:-9415},"
-    echo "  wait for the PIP pull, and re-run."
+    echo "  ADMISSION_REGISTER_UNAVAILABLE: the PDP could not read the onboarding"
+    echo "  register. Check that dvtp-onboarding-register is running."
+    echo "  PARTY_NOT_IN_REGISTRY: the register answered, but the peer is absent."
+    echo "  Add it at http://localhost:${GBO_PORT_DVTP_ONBOARDING_REGISTER:-9415}"
+    echo "  and re-run."
   } >&2
   exit 1
 }
