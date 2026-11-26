@@ -134,17 +134,32 @@ test_deny_literal_subject if {
 
 # The income API takes a BSN; a pseudonym is stopped before the source.
 test_deny_pseudonym_placeholder if {
-	_reasons_on(_person(fx.literal("consent:pseudonym")), _consent, 0) == {"CONSTRAINT_MISMATCH"}
+	_reasons_on(_person(fx.variable("bsn", "consent:pseudonym")), _consent, 0) == {"CONSTRAINT_MISMATCH"}
 }
 
 # consent:subject is not a placeholder, so it counts as a literal.
 test_deny_retired_placeholder if {
-	_reasons_on(_person(fx.literal("consent:subject")), _consent, 0) == {"CONSTRAINT_MISMATCH"}
+	_reasons_on(_person(fx.variable("bsn", "consent:subject")), _consent, 0) == {"CONSTRAINT_MISMATCH"}
 }
 
 # A placeholder stands for someone only under a verified consent.
 test_deny_placeholder_that_stands_for_nobody if {
-	"CONSTRAINT_MISMATCH" in _reasons_on(_person(fx.literal("consent:identity")), _with_consent({"context_valid": false}), 0)
+	"CONSTRAINT_MISMATCH" in _reasons_on(_person(fx.variable("bsn", "consent:identity")), _with_consent({"context_valid": false}), 0)
+}
+
+# The sidecar replaces the placeholder only in the request's variables. One
+# written in the query text, ingeschrevenPersoon(bsn: "consent:identity"),
+# reaches the source as it is and names nobody there.
+test_deny_placeholder_in_the_query_text if {
+	_reasons_on(_person(fx.literal("consent:identity")), _consent, 0) == {"CONSTRAINT_MISMATCH"}
+}
+
+# Nor as the default of the operation's variable, query($bsn: BSN! =
+# "consent:identity"): a variable the request did not supply is not in its
+# variables either.
+test_deny_placeholder_as_the_variables_default if {
+	bsn := {"value": "consent:identity", "origin": "default:bsn", "variables": ["bsn"]}
+	_reasons_on(_person(bsn), _consent, 0) == {"CONSTRAINT_MISMATCH"}
 }
 
 # A placeholder from a schema default is no placeholder the caller wrote.

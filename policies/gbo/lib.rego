@@ -40,6 +40,13 @@ argument(f, name) := entry.value if {
 # returns everything.
 argument_values(f, name) := {v | some v in argument(f, name)}
 
+# The argument's value is one variable the request supplied (origin
+# variable:<name>). Not a value written in the query text, not a default the
+# operation declares for its variable, not one built from parts.
+default from_variable(_, _) := false
+
+from_variable(f, name) if startswith(f.args[name].origin, "variable:")
+
 # ── Placeholders ─────────────────────────────────────────────────────────────
 # The names a consent-based query gives its subject. The consumer holds no
 # identifier of the citizen; after an allow the source puts in their place
