@@ -1,4 +1,4 @@
-.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-down fsc-test fsc-clean \
+.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-certs fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-consent-authorization fsc-seed-ldv-lezen fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
         require-development-cas create-development-registrar-root provision-wallet-registration provision-test-pid provision-qtsp-wallet-registration credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier provision-asi-eudi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
@@ -510,7 +510,7 @@ demo-full: policy-check require-ftv-postgres onboard-demo-sources provision-qtsp
 # it adds the integrator's FSC peer (...1100), seeds the delegated contract
 # and starts integrator-backend. The admission register already lists the
 # integrator; see docs/integrator.md.
-demo-integrator: fsc-int-certs
+demo-integrator: fsc-certs
 	$(FSC_COMPOSE) --profile integrator up -d int-controller int-manager int-outway int-txlog-api
 	$(MAKE) fsc-seed-int
 	docker compose --profile integrator up --build -d integrator-backend
@@ -525,7 +525,7 @@ demo-integrator: fsc-int-certs
 # certificate when missing), the NL Wallet verifier and, with the tunnel
 # overlay, the Cloudflare tunnel. The admission register lists the ASIP as a
 # system participant.
-demo-asi: fsc-asip-certs
+demo-asi: fsc-certs
 	$(FSC_COMPOSE) --profile asi up -d asip-controller asip-manager asip-outway asip-txlog-api
 	$(MAKE) fsc-seed-asip
 	@test -f "$(ASIP_SEAL_DIR)/seal-cert.pem" || $(MAKE) provision-asip-seal-certificate
@@ -597,63 +597,18 @@ fsc-ca:
 fsc-up: fsc-local-env fsc-ca
 	$(FSC_COMPOSE) up --build -d cfssl certportal
 
-fsc-directory-certs: fsc-up
-	@if [ ! -f fsc-infra/directory-peer/pki/org/directory-peer.pem ]; then \
-		bash fsc-infra/pki/bootstrap-directory-peer.sh; \
-	fi
+# Generates the certificates of every party in fsc-infra/peers.txt; parties
+# whose certificates exist are skipped.
+fsc-certs: fsc-up
+	bash fsc-infra/pki/bootstrap-peer.sh $$(bash fsc-infra/pki/bootstrap-peer.sh --list | cut -f1)
 
-fsc-directory-up: fsc-directory-certs
+fsc-directory-up: fsc-certs
 	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui
 
-fsc-edi-certs: fsc-up
-	@if [ ! -f fsc-infra/orgs/edi-issuer/pki/org/edi-issuer.pem ]; then \
-		bash fsc-infra/pki/bootstrap-edi-issuer.sh; \
-	fi
-
-fsc-edi-up: fsc-directory-up fsc-edi-certs
+fsc-edi-up: fsc-directory-up
 	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui edi-migrations-controller edi-migrations-manager edi-migrations-txlog-api edi-controller edi-manager edi-outway edi-txlog-api
 
-fsc-bd-certs: fsc-up
-	@if [ ! -f fsc-infra/orgs/belastingdienst-mock/pki/org/bd-mock.pem ]; then \
-		bash fsc-infra/pki/bootstrap-bd-mock.sh; \
-	fi
-
-fsc-brp-certs: fsc-up
-	@if [ ! -f fsc-infra/orgs/brp-mock/pki/org/brp-mock.pem ]; then \
-		bash fsc-infra/pki/bootstrap-brp-mock.sh; \
-	fi
-
-fsc-hv-certs: fsc-up
-	@if [ ! -f fsc-infra/orgs/hypotheekverlener-mock/pki/org/hypotheekverlener.pem ]; then \
-		bash fsc-infra/pki/bootstrap-hypotheekverlener.sh; \
-	fi
-
-fsc-consent-register-certs: fsc-up
-	@if [ ! -f fsc-infra/orgs/consent-register/pki/org/consent-register.pem ]; then \
-		bash fsc-infra/pki/bootstrap-consent-register.sh; \
-	fi
-
-fsc-gbo-pdp-certs: fsc-up
-	@if [ ! -f fsc-infra/orgs/gbo-pdp/pki/org/gbo-pdp.pem ]; then \
-		bash fsc-infra/pki/bootstrap-gbo-pdp.sh; \
-	fi
-
-fsc-ir-certs: fsc-up
-	@if [ ! -f fsc-infra/orgs/installatieregister/pki/org/installatieregister.pem ]; then \
-		bash fsc-infra/pki/bootstrap-installatieregister.sh; \
-	fi
-
-fsc-int-certs: fsc-up
-	@if [ ! -f fsc-infra/orgs/integrator/pki/org/integrator.pem ]; then \
-		bash fsc-infra/pki/bootstrap-integrator.sh; \
-	fi
-
-fsc-asip-certs: fsc-up
-	@if [ ! -f fsc-infra/orgs/asip/pki/org/asip.pem ]; then \
-		bash fsc-infra/pki/bootstrap-asip.sh; \
-	fi
-
-fsc-bd-up: fsc-directory-up fsc-bd-certs fsc-pdp-cert
+fsc-bd-up: fsc-directory-up fsc-pdp-cert
 	$(MAKE) pdp-up
 	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
 
@@ -673,7 +628,7 @@ fsc-pdp-cert:
 pdp-up: policy-check certs require-ftv-postgres fsc-pdp-cert
 	docker compose up --build -d --wait --force-recreate openftv-pdp
 
-fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-pdp-cert
+fsc-all-up: fsc-certs fsc-pdp-cert
 	$(MAKE) pdp-up
 	$(FSC_COMPOSE) up --build -d
 
@@ -687,30 +642,14 @@ fsc-test: fsc-up
 # rootful Docker, and under rootless Docker (where uid 1001 maps to a subuid),
 # the host user cannot delete them without sudo, so fsc-clean always
 # deletes them from a container of the pki-tools image that wrote them.
+# The certificate directories of every party in the party table:
+# fsc-infra/<dir>/pki/org and pki/internal.
+FSC_PEER_DIRS := $(shell bash fsc-infra/pki/bootstrap-peer.sh --list | cut -f2)
+
 FSC_CLEAN_FILES = \
 	fsc-infra/pki/ca/*.pem \
 	fsc-infra/pki/ca/*.csr \
-	fsc-infra/directory-peer/pki/org/*.pem \
-	fsc-infra/directory-peer/pki/internal/*.pem \
-	fsc-infra/directory-ui/pki/org/*.pem \
-	fsc-infra/orgs/edi-issuer/pki/org/*.pem \
-	fsc-infra/orgs/edi-issuer/pki/internal/*.pem \
-	fsc-infra/orgs/belastingdienst-mock/pki/org/*.pem \
-	fsc-infra/orgs/belastingdienst-mock/pki/internal/*.pem \
-	fsc-infra/orgs/brp-mock/pki/org/*.pem \
-	fsc-infra/orgs/brp-mock/pki/internal/*.pem \
-	fsc-infra/orgs/hypotheekverlener-mock/pki/org/*.pem \
-	fsc-infra/orgs/hypotheekverlener-mock/pki/internal/*.pem \
-	fsc-infra/orgs/consent-register/pki/org/*.pem \
-	fsc-infra/orgs/consent-register/pki/internal/*.pem \
-	fsc-infra/orgs/gbo-pdp/pki/org/*.pem \
-	fsc-infra/orgs/gbo-pdp/pki/internal/*.pem \
-	fsc-infra/orgs/installatieregister/pki/org/*.pem \
-	fsc-infra/orgs/installatieregister/pki/internal/*.pem \
-	fsc-infra/orgs/integrator/pki/org/*.pem \
-	fsc-infra/orgs/integrator/pki/internal/*.pem \
-	fsc-infra/orgs/asip/pki/org/*.pem \
-	fsc-infra/orgs/asip/pki/internal/*.pem \
+	$(patsubst %,fsc-infra/%/pki/*/*.pem,$(FSC_PEER_DIRS)) \
 	services/openftv-pdp/certs/*.pem
 
 # The files go first: `down --rmi local` removes the compose-built pki-tools

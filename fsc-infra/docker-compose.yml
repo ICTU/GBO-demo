@@ -18,7 +18,7 @@ name: ${FSC_PROJECT_NAME:-fsc-infra}
 #
 # Assumptions:
 #   - pki/generate-root-ca.sh has run: ca/*.pem exist.
-#   - pki/bootstrap-directory-peer.sh has run after make fsc-up:
+#   - pki/bootstrap-peer.sh directory-peer directory-ui has run after make fsc-up:
 #     directory-peer/pki/{org,internal}/* and directory-ui/pki/org/* exist.
 #   - GROUP_ID = fsc-demo (arbitrary; our own group name).
 
