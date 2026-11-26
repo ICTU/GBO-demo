@@ -47,11 +47,11 @@ export async function revokeConsent(token: string, consentId: string): Promise<v
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}`, ...demoSessionHeader() },
   })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`revokeConsent failed (${res.status}): ${text}`)
-  }
+  if (!res.ok) throw await portalApiError('revokeConsent', res)
 }
+
+/** The reason the portal gives for a consent that is already revoked or expired. */
+export const CONSENT_NOT_REVOCABLE = 'CONSENT_NOT_REVOCABLE'
 
 // One moment a consent was used: a source delivered data under it to the
 // service provider it was given to.

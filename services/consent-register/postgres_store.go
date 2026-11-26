@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -295,11 +296,14 @@ func (s *PostgreSQLStore) Get(ctx context.Context, consentID string) (*Consent, 
 	return consent, true, nil
 }
 
-// Revoke revokes a consent and stores its LDV record in one transaction. The
-// record is built from the revoked consent, so it can only be written once the
-// revocation is known to have happened — which is why it takes a function
-// rather than the bytes.
-func (s *PostgreSQLStore) Revoke(ctx context.Context, consentID string, record func(*Consent) ([]byte, error)) (*Consent, bool, error) {
+// Revoke revokes a consent that is still active at now and stores its LDV
+// record in one transaction. The record is built from the revoked consent, so
+// it can only be written once the revocation is known to have happened —
+// which is why it takes a function rather than the bytes.
+//
+// The rule is in the UPDATE itself, so a concurrent revocation cannot slip in
+// between a check and the write.
+func (s *PostgreSQLStore) Revoke(ctx context.Context, consentID string, now time.Time, record func(*Consent) ([]byte, error)) (*Consent, bool, error) {
 	transaction, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, false, fmt.Errorf("begin: %w", err)
@@ -309,7 +313,7 @@ func (s *PostgreSQLStore) Revoke(ctx context.Context, consentID string, record f
 	consent, err := scanConsent(transaction.QueryRow(ctx, `
 		UPDATE consents
 		SET status = 'REVOKED'
-		WHERE consent_id = $1
+		WHERE consent_id = $1 AND status <> 'REVOKED' AND valid_until > $2
 		RETURNING
 			consent_id,
 			status,
@@ -320,12 +324,22 @@ func (s *PostgreSQLStore) Revoke(ctx context.Context, consentID string, record f
 			use_case,
 			created_at,
 			valid_until
-	`, consentID))
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	`, consentID, now))
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Nothing was updated: the consent does not exist, or it is no
+		// longer active. Consents are never deleted, so this tells which.
+		var exists bool
+		if err := transaction.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM consents WHERE consent_id = $1)`, consentID,
+		).Scan(&exists); err != nil {
+			return nil, false, err
+		}
+		if !exists {
 			return nil, false, nil
 		}
-
+		return nil, true, errNotRevocable
+	}
+	if err != nil {
 		return nil, false, err
 	}
 

@@ -1266,6 +1266,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **An expired or revoked consent can no longer be revoked** (#600). The
+  detail page only offered "Toestemming intrekken" for an active consent, but
+  a revoke request sent directly set an expired consent to `REVOKED` and the
+  register logged another withdrawal each time. The consent portal backend
+  now refuses a revoke unless the consent is active, after the ownership
+  check, with `409` and reason `CONSENT_NOT_REVOCABLE`. The consent register
+  applies the same rule in `DELETE /consents/{id}` (in the same transaction
+  as the update for Postgres): it answers `409` with that reason, leaves the
+  status as it is and writes no `toestemming-intrekken` record. The detail
+  page shows "Deze toestemming is al ingetrokken of verlopen en kan niet meer
+  worden ingetrokken." instead of "Intrekken mislukt" and reloads the consent.
 - **The reference QTSP's end-to-end tests clean up after themselves.** They
   left the service processes they started running and a `qtsp-e2e-*`
   directory of about 30 MB (built binaries and generated keys) in the temp

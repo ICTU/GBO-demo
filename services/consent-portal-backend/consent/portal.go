@@ -279,6 +279,8 @@ func (p *Portal) ListConsents(ctx context.Context, citizen BSN) ([]Record, error
 }
 
 // RevokeConsent revokes a consent after verifying it belongs to the caller.
+// Only an active consent can be revoked: one that is revoked already or has
+// expired gives ErrNotRevocable, and the register is not asked.
 func (p *Portal) RevokeConsent(ctx context.Context, citizen BSN, consentID string) error {
 	emit := p.stepEmitter(ctx, "revoke_consent")
 	emit("portal_received", "toestemmingsportaal", map[string]any{"consent_id": consentID})
@@ -295,6 +297,9 @@ func (p *Portal) RevokeConsent(ctx context.Context, citizen BSN, consentID strin
 	// The register adapter cannot see who is calling, and must not.
 	if rec.SubjectRef != subjectRef {
 		return ErrNotOwned
+	}
+	if rec.EffectiveStatus(p.now()) != StatusActive {
+		return ErrNotRevocable
 	}
 
 	emit("consent_revoking", "consent-register", map[string]any{"consent_id": consentID})

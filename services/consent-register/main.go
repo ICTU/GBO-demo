@@ -51,6 +51,19 @@ type Consent struct {
 	ValidUntil       time.Time    `json:"valid_until"`
 }
 
+// errNotRevocable is what ConsentStore.Revoke returns for a consent that is
+// no longer active: it was revoked already, or its validity has passed.
+// Revoking it again would turn an expired consent into a revoked one and log
+// a withdrawal that never happened (#600).
+var errNotRevocable = errors.New("consent is revoked or expired and cannot be revoked")
+
+// revocableAt says whether the consent is still active at now: not revoked,
+// and valid until after now. PostgreSQLStore.Revoke puts the same rule in its
+// UPDATE.
+func (c *Consent) revocableAt(now time.Time) bool {
+	return c.Status != "REVOKED" && c.ValidUntil.After(now)
+}
+
 // defaultValiditySeconds is the consent lifetime when the request does not
 // specify one. validity_seconds (a duration) is converted once at creation
 // into valid_until (an absolute timestamp); the chain only uses valid_until.
@@ -176,9 +189,11 @@ type ConsentStore interface {
 	Create(ctx context.Context, consent *Consent, record []byte) error
 	List(ctx context.Context, filter ConsentFilter) ([]*Consent, error)
 	Get(ctx context.Context, consentID string) (*Consent, bool, error)
-	// Revoke revokes a consent and stores its record in one transaction. The
-	// record is built from the revoked consent, hence the function.
-	Revoke(ctx context.Context, consentID string, record func(*Consent) ([]byte, error)) (*Consent, bool, error)
+	// Revoke revokes a consent that is still active at now, and stores its
+	// record in one transaction. The record is built from the revoked
+	// consent, hence the function. A consent that is revoked already or has
+	// expired is left as it is, with no record: errNotRevocable.
+	Revoke(ctx context.Context, consentID string, now time.Time, record func(*Consent) ([]byte, error)) (*Consent, bool, error)
 
 	// AppendRecord stores a record with nothing to be atomic with — the
 	// operations that read rather than mutate.
@@ -331,7 +346,7 @@ func (s *Store) Get(_ context.Context, consentID string) (*Consent, bool, error)
 	return consent, ok, nil
 }
 
-func (s *Store) Revoke(_ context.Context, consentID string, record func(*Consent) ([]byte, error)) (*Consent, bool, error) {
+func (s *Store) Revoke(_ context.Context, consentID string, now time.Time, record func(*Consent) ([]byte, error)) (*Consent, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -339,12 +354,17 @@ func (s *Store) Revoke(_ context.Context, consentID string, record func(*Consent
 	if !ok {
 		return nil, false, nil
 	}
+	if !consent.revocableAt(now) {
+		return nil, true, errNotRevocable
+	}
 
-	consent.Status = "REVOKED"
-	encoded, err := record(consent)
+	revoked := *consent
+	revoked.Status = "REVOKED"
+	encoded, err := record(&revoked)
 	if err != nil {
 		return nil, false, err
 	}
+	*consent = revoked
 	s.appendLocked(encoded)
 
 	return consent, true, nil
@@ -644,7 +664,7 @@ func handleConsentByID(store ConsentStore, logbook *registerLogbook, usesHandler
 			// The record is built from the revoked consent, so it can only be
 			// assembled once the revocation has happened — and it is written
 			// in the same transaction, so it cannot happen without a record.
-			c, ok, err := store.Revoke(r.Context(), id, func(revoked *Consent) ([]byte, error) {
+			c, ok, err := store.Revoke(r.Context(), id, start, func(revoked *Consent) ([]byte, error) {
 				return logbook.buildRecord(r,
 					consentRevokeActivity, "dataverwerking.toestemming-intrekken",
 					revoked.SubjectRef, start, http.StatusOK,
@@ -652,6 +672,14 @@ func handleConsentByID(store ConsentStore, logbook *registerLogbook, usesHandler
 						"dpl.gbo.consentId": revoked.ConsentID,
 					})
 			})
+			if errors.Is(err, errNotRevocable) {
+				writeJSON(w, http.StatusConflict, map[string]string{
+					"error":  err.Error(),
+					"reason": "CONSENT_NOT_REVOCABLE",
+				})
+
+				return
+			}
 			if err != nil {
 				slog.Error("revoke consent", "err", err.Error())
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not revoke consent"})

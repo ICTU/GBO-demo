@@ -383,6 +383,13 @@ sequenceDiagram
     PDP->>PDP: DENY met CONSENT_WITHDRAWN
 ```
 
+Alleen een actief consent kan worden ingetrokken (#600). Het portaal
+controleert eerst of het consent van deze burger is, en weigert daarna een
+consent dat al is ingetrokken of verlopen met `409` en reden
+`CONSENT_NOT_REVOCABLE`. Het register past dezelfde regel toe bij
+`DELETE /consents/{id}`: de status blijft dan ongewijzigd en er komt geen
+nieuw `toestemming-intrekken`-record in het logboek.
+
 Een ander actief consent voor dezelfde burger kan het ingetrokken consent niet
 vervangen: de PDP controleert altijd uitsluitend het `consent_id` uit het
 ondertekende token.

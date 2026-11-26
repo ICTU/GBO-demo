@@ -101,6 +101,8 @@ func statusFor(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, consent.ErrNotOwned):
 		return http.StatusForbidden
+	case errors.Is(err, consent.ErrNotRevocable):
+		return http.StatusConflict
 	case errors.Is(err, consent.ErrInvalidBSN):
 		return http.StatusBadRequest
 	default:
@@ -168,8 +170,11 @@ func citizen(method, op string, fn citizenFunc) http.HandlerFunc {
 				return
 			}
 			body := map[string]any{"error": err.Error()}
-			if errors.Is(err, consent.ErrNotOwned) {
+			switch {
+			case errors.Is(err, consent.ErrNotOwned):
 				body["reason"] = "consent_not_owned_by_caller"
+			case errors.Is(err, consent.ErrNotRevocable):
+				body["reason"] = "CONSENT_NOT_REVOCABLE"
 			}
 			logctx.From(ctx).Error("portal."+op+" failed", "err", err.Error())
 			writeJSON(w, statusFor(err), body)

@@ -152,8 +152,13 @@ func (c Client) polymorphicURL(subject consent.SubjectRef) string {
 func (c Client) Revoke(ctx context.Context, consentID string) error {
 	status, err := c.Caller.Do(ctx, "Revoke Consent", http.MethodDelete, c.Base+"/consents/"+consentID, nil, nil)
 	if err != nil {
-		if status == http.StatusNotFound {
+		switch status {
+		case http.StatusNotFound:
 			return consent.ErrNotFound
+		case http.StatusConflict:
+			// The register refuses a consent that is no longer active; the
+			// status can change between the portal's Get and this call.
+			return consent.ErrNotRevocable
 		}
 		return err
 	}

@@ -94,6 +94,11 @@ var (
 	// does not match the record. Without this check any authenticated citizen
 	// could revoke any consent_id they guess.
 	ErrNotOwned = errors.New("consent does not belong to authenticated citizen")
+	// ErrNotRevocable is returned when a consent is no longer active: it was
+	// revoked already, or its validity has passed. Revoking it would turn an
+	// expired consent into a revoked one and log a withdrawal that never
+	// happened (#600).
+	ErrNotRevocable = errors.New("consent is revoked or expired and cannot be revoked")
 )
 
 // ScopeEntry is the per-bronhouder field selection the citizen consented to.
