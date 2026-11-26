@@ -10,7 +10,7 @@ labels: enhancement
 
 ## Wanted behaviour
 
-<!-- What the demo should show or do: a scenario, a flow, a contract (API, message, policy decision). -->
+<!-- What the demo should show or do: a scenario, a flow, a contract (API, message, policy decision). A ```mermaid diagram helps for flows. -->
 
 ## Why
 

@@ -4,11 +4,12 @@
 
 ## Solution
 
-<!-- What changed and how it fixes the problem. Add the smallest visual that makes it clear, when one helps (diagram, table, screenshot). -->
+<!-- What changed and how it fixes the problem. Add the smallest visual that makes it clear, when one helps (a ```mermaid diagram, a table, a screenshot). -->
 
 ## Evidence
 
-<!-- Before and after: a screenshot or real output (command, test run, curl). Not a description of it. -->
+<!-- Before and after: a screenshot or real output (command, test run, curl). Not a description of it.
+     Screenshot via gh 2.105+: gh pr edit --attach './after.png#After'; a ![After](./after.png) in the body becomes the uploaded image. -->
 
 ## Merge danger
 

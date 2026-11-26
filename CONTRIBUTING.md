@@ -38,7 +38,7 @@ Before opening a PR:
 
 3. Match the code style of the file you're editing. New Go services get the same `.golangci.yml` treatment as existing ones.
 
-4. Fill in the PR template: the problem, the solution, evidence (before and after: a screenshot or real output), the merge danger (how easy to revert, what else can break) and the related GBO-TO IDs (or "none").
+4. Fill in the PR template: the problem, the solution, evidence (before and after: a screenshot or real output), the merge danger (how easy to revert, what else can break) and the related GBO-TO IDs (or "none"). Diagrams can go in a ```` ```mermaid ```` block (GitHub and GitLab render it). With gh 2.105 or newer, attach screenshots from the command line: `gh pr create --attach './after.png#After'` (also `gh pr edit` and `gh pr comment`); a `![After](./after.png)` in the body is rewritten to the uploaded image.
 
 ## Scope
 
