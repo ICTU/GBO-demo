@@ -1,14 +1,22 @@
-## Summary
+## Problem
 
-<!-- What changes, in one or two sentences. -->
+<!-- What goes wrong or is missing, and why it matters. Link the issue (Closes #NN). -->
 
-## Why
+## Solution
 
-<!-- The reason for the change. If it fixes an issue, link it (Closes #NN). -->
+<!-- What changed and how it fixes the problem. Add the smallest visual that makes it clear, when one helps (diagram, table, screenshot). -->
 
-## How to test
+## Evidence
 
-<!-- Steps a reviewer can run to verify. Ideally a copy-paste-able curl / make target. -->
+<!-- Before and after: a screenshot or real output (command, test run, curl). Not a description of it. -->
+
+## Merge danger
+
+<!-- Easy to revert or not (migrations, renamed contracts, data)? What else can break (other services, flows, the demo)? -->
+
+## TO IDs
+
+<!-- REQ-, SL- and F-IDs from ICTU/GBO-TO this implements or touches, or "none". -->
 
 ## Checklist
 

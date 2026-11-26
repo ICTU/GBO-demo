@@ -4,12 +4,12 @@ Thanks for taking the time to look at this reference-architecture demo. Bug repo
 
 ## Reporting issues
 
-Please use GitHub Issues for bug reports and feature discussions. Include:
+Please use GitHub Issues for bug reports and feature discussions, with the bug report or feature request template. Describe:
 
-- What you tried to run (`make demo`, a specific `curl`, a UI interaction)
-- What you expected to happen
-- What actually happened (error message, screenshot, log snippet)
-- Your environment (OS, Docker version)
+- Current and wanted behaviour, in terms of behaviour and contracts (API responses, flow steps, UI results), not file paths
+- Acceptance criteria that can each be checked on their own
+- What is out of scope
+- For bugs: how to reproduce it and your environment (OS, Docker version)
 
 For security issues, see [SECURITY.md](SECURITY.md) — please do **not** open a public issue.
 
@@ -38,7 +38,7 @@ Before opening a PR:
 
 3. Match the code style of the file you're editing. New Go services get the same `.golangci.yml` treatment as existing ones.
 
-4. Include a short PR description: what changes, why, and how you verified it works.
+4. Fill in the PR template: the problem, the solution, evidence (before and after: a screenshot or real output), the merge danger (how easy to revert, what else can break) and the related GBO-TO IDs (or "none").
 
 ## Scope
 

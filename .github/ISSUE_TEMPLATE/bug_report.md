@@ -4,22 +4,28 @@ about: Something broke while running or building the demo
 labels: bug
 ---
 
-## What happened
+## Current behaviour
 
-<!-- One or two lines. Include an error message or unexpected behaviour. -->
+<!-- What happens: error text, response, screenshot. -->
+
+## Wanted behaviour
+
+<!-- What should happen instead, in terms of behaviour or contract (API response, flow step, UI result). -->
 
 ## Steps to reproduce
 
 1. `make demo` (or a specific target / curl / UI action)
 2. …
 
-## Expected
+## Acceptance criteria
 
-<!-- What did you think would happen? -->
+<!-- Each one checkable on its own. Describe behaviour, not file paths. -->
 
-## Actual
+- [ ] …
 
-<!-- Screenshot, error text, or a link to a paste. -->
+## Out of scope
+
+<!-- What this issue does not cover. -->
 
 ## Environment
 
@@ -27,6 +33,4 @@ labels: bug
 - Docker version:
 - Compose plugin version:
 
-## Extra context
-
-<!-- Anything else that might help. Logs from `docker compose logs <service>` are useful. -->
+<!-- Logs from `docker compose logs <service>` help. -->
