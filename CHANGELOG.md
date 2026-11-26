@@ -635,6 +635,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **Consent proof may expire before its consent** (#647): the source PDP
+  (`policies/gbo/consent.rego`) no longer requires a consent proof's `exp` to
+  equal its `valid_until`; it accepts `exp <= valid_until` and refuses a proof
+  that outlives its consent with `CONSENT_CONTEXT_INVALID`. This prepares for
+  short-lived proofs that keep the end of the consent in `valid_until`. Proof
+  lifetimes are unchanged.
 - **The safety audit runs in CI** (`safety` job, `make check-safety`) and
   scans every tracked file. It now flags OINs with a real register prefix;
   test data uses demo OINs (`99999999…`) instead.

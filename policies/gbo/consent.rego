@@ -135,7 +135,7 @@ _claim_errors contains "not yet valid" if _now_ns + _clock_skew_ns < _ns(_claims
 
 _claim_errors contains "issued in the future" if _now_ns + _clock_skew_ns < _ns(_claims.iat)
 
-_claim_errors contains "valid_until does not match exp" if not _valid_until_matches_exp
+_claim_errors contains "exp is after valid_until" if not _exp_within_valid_until
 
 _audience_matches if _claims.aud == config.audience
 
@@ -164,7 +164,11 @@ _required_claims_present if {
 	}
 }
 
-_valid_until_matches_exp if time.parse_rfc3339_ns(_claims.valid_until) == _ns(_claims.exp)
+# A proof may expire before its consent ends, so the register can issue
+# short-lived proofs that carry the real end of the consent in valid_until.
+# It may never outlive its consent. A valid_until that does not parse fails
+# this check too.
+_exp_within_valid_until if _ns(_claims.exp) <= time.parse_rfc3339_ns(_claims.valid_until)
 
 # ── Verification outcome ───────────────────────────────────────────────────
 # Signature before claims: the claims of an unverified token are not the
