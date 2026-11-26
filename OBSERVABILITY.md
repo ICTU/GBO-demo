@@ -1,41 +1,41 @@
 # Observability
 
-The local Compose environment and the simulation deployment use the same
-three observability data paths:
+The local Compose environment and the simulation deployment use the same three
+observability data paths:
 
 1. Application traces are sent over OTLP to a gateway collector.
 2. The collector stores traces in Jaeger and also forwards them to
    `dev-portal-backend/v1/traces` for the live architecture strip.
 3. Container logs are shipped to Loki. The developer portal reads the policy
-   engine's console decision log from Loki as detail next to the
-   Authorization Decision Log, while Grafana provides the broader log view.
+   engine's console decision log from Loki as detail next to the Authorization
+   Decision Log, while Grafana provides the broader log view.
 
-The simulation platform currently has no stable, tenant-consumable core OTLP
-or Loki endpoint in its tenant contract. The fallback is therefore deployed
-once alongside the developer portal in MinEZK and shared with MinBZK, rather
-than duplicated per tenant.
+The simulation platform currently has no stable, tenant-consumable core OTLP or
+Loki endpoint in its tenant contract. The fallback is therefore deployed once
+alongside the developer portal in MinEZK and shared with MinBZK, rather than
+duplicated per tenant.
 
-OpenFSC forwards the `traceparent` header between peers unchanged, so the
-spans of a source (`bron-sidecar`, `decryption-component`, `graphql-server`)
-join the consumer's trace. The one hop without it is the Inway's call to the
-PDP: the Inway calls the PDP on a fresh context, with the FSC transaction id
-as `X-Request-Id`. The applications therefore also record
-`gbo.fsc.transaction_id`. The developer portal uses this value to correlate
-the consumer trace, the PDP decision and the FSC transaction logs.
+OpenFSC forwards the `traceparent` header between peers unchanged, so the spans
+of a source (`bron-sidecar`, `decryption-component`, `graphql-server`) join the
+consumer's trace. The one hop without it is the Inway's call to the PDP: the
+Inway calls the PDP on a fresh context, with the FSC transaction id as
+`X-Request-Id`. The applications therefore also record `gbo.fsc.transaction_id`.
+The developer portal uses this value to correlate the consumer trace, the PDP
+decision and the FSC transaction logs.
 
 The logbooks, the PDP and the FSC components export no spans. Jaeger therefore
 shows some spans under a parent it does not have: where a hop carries an LDV
-record, its `traceparent` names the span id of that record, which exists only
-in the logbook (`InjectTraceparent` and `CarryTraceparent` in
+record, its `traceparent` names the span id of that record, which exists only in
+the logbook (`InjectTraceparent` and `CarryTraceparent` in
 [`services/ldv-client/tracecontext.go`](services/ldv-client/tracecontext.go)).
 The consent register's status span likewise hangs under the PDP's lookup span,
 which exists nowhere: the PDP exports no spans and
 [`policies/gbo/consent.rego`](policies/gbo/consent.rego) sends a fixed, made-up
 span id in its `traceparent`.
 
-The eudi-adapter records the activated `gbo.source_oin` and `gbo.type_id` on
-its request span. These values come from the onboarded source record, not from
-an adapter catalog. The bron services themselves are recognised by their
+The eudi-adapter records the activated `gbo.source_oin` and `gbo.type_id` on its
+request span. These values come from the onboarded source record, not from an
+adapter catalog. The bron services themselves are recognised by their
 `OTEL_SERVICE_NAME` (`bron-sidecar`/`graphql-server` versus
 `brp-sidecar`/`brp-graphql-server`).
 
@@ -43,33 +43,33 @@ an adapter catalog. The bron services themselves are recognised by their
 
 The production developer-portal image accepts these runtime variables:
 
-| Variable | Purpose |
-| --- | --- |
-| `JAEGER_PUBLIC_URL` | Public Jaeger UI used by trace links |
-| `GRAFANA_PUBLIC_URL` | Public Grafana UI used by log links |
-| `EUDI_PUBLIC_URL` | Public issuance-server URL |
+| Variable             | Purpose                              |
+| -------------------- | ------------------------------------ |
+| `JAEGER_PUBLIC_URL`  | Public Jaeger UI used by trace links |
+| `GRAFANA_PUBLIC_URL` | Public Grafana UI used by log links  |
+| `EUDI_PUBLIC_URL`    | Public issuance-server URL           |
 
 `dev-portal-backend` accepts:
 
-| Variable | Purpose |
-| --- | --- |
-| `ADL_DATABASE_URL` | Authorization Decision Log, read with a SELECT-only role |
-| `LOKI_URL` | Loki base URL |
-| `LOKI_DECISION_QUERY` | LogQL selector for the engine's console decision log |
-| `FSC_TXLOG_*_URL/CERT/KEY/CA` | Local txlog-api or remote Manager logging source |
+| Variable                      | Purpose                                                  |
+| ----------------------------- | -------------------------------------------------------- |
+| `ADL_DATABASE_URL`            | Authorization Decision Log, read with a SELECT-only role |
+| `LOKI_URL`                    | Loki base URL                                            |
+| `LOKI_DECISION_QUERY`         | LogQL selector for the engine's console decision log     |
+| `FSC_TXLOG_*_URL/CERT/KEY/CA` | Local txlog-api or remote Manager logging source         |
 
 `BD_HV` and `BD_EDI` are optional provider-log sources. They allow the same
-provider Manager to be queried from the authorized perspective of the DvTP
-and EUDI consumer peers respectively.
+provider Manager to be queried from the authorized perspective of the DvTP and
+EUDI consumer peers respectively.
 
 ## Data handling
 
-The OpenFTV PDP has no OpenTelemetry instrumentation of its own. It writes
-what it evaluates to two places: the request to the Authorization Decision
-Log, and the mapped input to the embedded OPA's console decision log. Neither
-masks anything. OpenFTV's ADL has no masking option, and the console log
-ignores `data.system.log.mask`. A BSN in the request therefore reaches both;
-how to keep it out is still open.
+The OpenFTV PDP has no OpenTelemetry instrumentation of its own. It writes what
+it evaluates to two places: the request to the Authorization Decision Log, and
+the mapped input to the embedded OPA's console decision log. Neither masks
+anything. OpenFTV's ADL has no masking option, and the console log ignores
+`data.system.log.mask`. A BSN in the request therefore reaches both; how to keep
+it out is still open.
 
 Jaeger and Loki are debugging stores, not audit stores. The simulation
 deployment uses seven-day retention. OpenFSC transaction logs remain the
@@ -81,16 +81,16 @@ authoritative record of each authorization decision.
 The OpenFTV PDP writes one record per evaluation to the Authorization Decision
 Log (Logius ADL), in the `ftv_adl` database on `postgres-ftv`. That record is
 the authoritative audit record of an authorization decision. It holds the
-AuthZEN request and response: the decision, and on a denial the policy's
-reason code, which OpenFTV carries in `reason_user.en`.
+AuthZEN request and response: the decision, and on a denial the policy's reason
+code, which OpenFTV carries in `reason_user.en`.
 
 The embedded OPA also writes a "Decision Log" line to stdout for every
 evaluation, and promtail ships it to Loki. That line carries the whole policy
-result, including which rule granted or denied each field. It is
-observability, and nothing may cite it as the record of a decision. The
-developer portal shows both side by side, the ADL record as the decision and
-the console line as detail, and colours the PDP by the ADL record alone. It
-reads the ADL with a SELECT-only role that `postgres-ftv-init` creates.
+result, including which rule granted or denied each field. It is observability,
+and nothing may cite it as the record of a decision. The developer portal shows
+both side by side, the ADL record as the decision and the console line as
+detail, and colours the PDP by the ADL record alone. It reads the ADL with a
+SELECT-only role that `postgres-ftv-init` creates.
 
 ## Not observability: the Logboek Dataverwerkingen
 
@@ -101,20 +101,21 @@ Verantwoordelijke that performed it — `logboek-bd` for the Belastingdienst,
 keeps its own, `logboek-afnemer`. The LVG/Installatie Register pilot adds
 `logboek-lvg` and `logboek-ir` ([`docs/lvg-ir.md`](docs/lvg-ir.md)). Separate
 stores, served by [`ldv-logboek`](services/ldv-logboek/README.md), implementing
-Logius LDV v1.0.0. It uses the OpenTelemetry log-record shape, which makes it look like a
-second trace exporter. It is not, and the difference is the point: a span here
-is best-effort exhaust of a technical operation, sampled and short-lived,
-while an LDV record is an administrative record that must exist for every
-processing, is confirmed on write, and is never sampled.
+Logius LDV v1.0.0. It uses the OpenTelemetry log-record shape, which makes it
+look like a second trace exporter. It is not, and the difference is the point: a
+span here is best-effort exhaust of a technical operation, sampled and
+short-lived, while an LDV record is an administrative record that must exist for
+every processing, is confirmed on write, and is never sampled.
 
-Nothing in this document changes because of it. The collector, Jaeger, Loki
-and Grafana are untouched; the logbooks are additional stores with their own
-guarantees. A component makes its record durable in a local outbox before
-its response leaves and delivers it to the logbook afterwards, with retries.
-It fails its request when that local write fails rather than dropping the
-record — which is exactly what an observability pipeline must never do, and
-exactly what this one must. An unreachable logbook only delays delivery; it
-does not stop the chain ([`services/ldv-logboek`](services/ldv-logboek/README.md#producers-durable-first-delivered-after)).
+Nothing in this document changes because of it. The collector, Jaeger, Loki and
+Grafana are untouched; the logbooks are additional stores with their own
+guarantees. A component makes its record durable in a local outbox before its
+response leaves and delivers it to the logbook afterwards, with retries. It
+fails its request when that local write fails rather than dropping the record —
+which is exactly what an observability pipeline must never do, and exactly what
+this one must. An unreachable logbook only delays delivery; it does not stop the
+chain
+([`services/ldv-logboek`](services/ldv-logboek/README.md#producers-durable-first-delivered-after)).
 
 The two are joined by the trace id. An LDV record takes it over from
 `traceparent`, as the standard requires. The `Fsc-Transaction-Id` is FSC's own
@@ -124,6 +125,5 @@ passes the transaction id as `X-Request-Id`, so the record gets a trace of its
 own and no `adl.fsc.transaction_id`. Both values do sit in the headers of the
 recorded request, which is where the portal finds the record. The portal's
 **Logboek Dataverwerkingen** panel shows, per trace, the LDV records of every
-Verantwoordelijke next to the FSC transaction records and the PDP decision.
-How a reader follows a chain across logbooks is in
-[`docs/ldv`](docs/ldv/README.md).
+Verantwoordelijke next to the FSC transaction records and the PDP decision. How
+a reader follows a chain across logbooks is in [`docs/ldv`](docs/ldv/README.md).

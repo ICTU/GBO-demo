@@ -7,5 +7,5 @@
 (OpenAPI 1.1.0), copied unchanged. They are published under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) by Logius.
 
-`fscread_contract_test.go` checks the reduced response of the FSC read
-listener against the response schema in that file.
+`fscread_contract_test.go` checks the reduced response of the FSC read listener
+against the response schema in that file.

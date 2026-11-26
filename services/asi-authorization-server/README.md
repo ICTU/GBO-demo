@@ -1,39 +1,48 @@
 # asi-authorization-server — authorization server of the ASIP mock (ETSI TS 119 478 clause 6.1.3)
 
-The authorization server (I4 Authorize) of the ASIP mock in [`services/asi-provider`](../asi-provider). A qualified trust service provider (QTSP) obtains a DPoP-bound JWT access token here and presents it to the ASIP for `/verify` or `/retrieve`. Part of epic #336; this is slice 2 (#503).
+The authorization server (I4 Authorize) of the ASIP mock in
+[`services/asi-provider`](../asi-provider). A qualified trust service provider
+(QTSP) obtains a DPoP-bound JWT access token here and presents it to the ASIP
+for `/verify` or `/retrieve`. Part of epic #336; this is slice 2 (#503).
 
-It also serves GBO's own credential issuer ([`eudi-credential-issuer`](../eudi-credential-issuer)), which logs the citizen in here before it issues a source's attestation to a wallet with the authorization code flow (#614). That use is not part of ETSI TS 119 478; see [Credential issuers as clients](#credential-issuers-as-clients).
+It also serves GBO's own credential issuer
+([`eudi-credential-issuer`](../eudi-credential-issuer)), which logs the citizen
+in here before it issues a source's attestation to a wallet with the
+authorization code flow (#614). That use is not part of ETSI TS 119 478; see
+[Credential issuers as clients](#credential-issuers-as-clients).
 
-The ASIP and the authorization server may be operated by one party, but they are two roles (ASIP and AZSP). They are separate services with separate keys: the ASIP only knows the issuer and fetches the signing keys through the metadata.
+The ASIP and the authorization server may be operated by one party, but they are
+two roles (ASIP and AZSP). They are separate services with separate keys: the
+ASIP only knows the issuer and fetches the signing keys through the metadata.
 
 ## What is real and what is not
 
-| Part | Status |
-|---|---|
-| Authorization code flow (RFC 6749 section 4.1) with PKCE, S256 only (REQ-AZSP-6.1.3.1-01, -04) | implemented |
-| Client authentication with `private_key_jwt` (REQ-AZSP-6.1.3.1-05) | implemented; the only method offered |
-| DPoP-bound access tokens (REQ-AZSP-6.1.3.1-06) | implemented; every token is bound |
-| JWT access tokens per RFC 9068 (REQ-AZSP-6.1.3.1-08) | implemented; contents below |
-| Metadata (RFC 8414) and JWKS | implemented |
-| Dynamic client registration with a sealed software statement (REQ-AZSP-6.1.3.2-01) | implemented; see below. Clients can also be registered in configuration |
-| Register of wallet-relying parties (CIR (EU) 2025/848, D9) | **stub**: entries from `testdata/register.json`, read again on every lookup; the national register and its API (ETSI/EUDI TS5) are not available to this project |
-| QTSP certificates (REQ-AZSP-6.1.3.2-02) | **test certificates** from the development reader CA, not Wallet-Relying Party Access Certificates according to ETSI TS 119 411-8 |
+| Part                                                                                                     | Status                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authorization code flow (RFC 6749 section 4.1) with PKCE, S256 only (REQ-AZSP-6.1.3.1-01, -04)           | implemented                                                                                                                                                                                                                                                                                                           |
+| Client authentication with `private_key_jwt` (REQ-AZSP-6.1.3.1-05)                                       | implemented; the only method offered                                                                                                                                                                                                                                                                                  |
+| DPoP-bound access tokens (REQ-AZSP-6.1.3.1-06)                                                           | implemented; every token is bound                                                                                                                                                                                                                                                                                     |
+| JWT access tokens per RFC 9068 (REQ-AZSP-6.1.3.1-08)                                                     | implemented; contents below                                                                                                                                                                                                                                                                                           |
+| Metadata (RFC 8414) and JWKS                                                                             | implemented                                                                                                                                                                                                                                                                                                           |
+| Dynamic client registration with a sealed software statement (REQ-AZSP-6.1.3.2-01)                       | implemented; see below. Clients can also be registered in configuration                                                                                                                                                                                                                                               |
+| Register of wallet-relying parties (CIR (EU) 2025/848, D9)                                               | **stub**: entries from `testdata/register.json`, read again on every lookup; the national register and its API (ETSI/EUDI TS5) are not available to this project                                                                                                                                                      |
+| QTSP certificates (REQ-AZSP-6.1.3.2-02)                                                                  | **test certificates** from the development reader CA, not Wallet-Relying Party Access Certificates according to ETSI TS 119 411-8                                                                                                                                                                                     |
 | User identification and authorization by the user (REQ-AZSP-6.1.3.1-02, -03; clause 6.1.3.3, steps 7-11) | one page shows the request and offers a login with the **NL Wallet** (OpenID4VP PID disclosure through nl-wallet's verification_server, on the same device when the issuer uses HTTPS or cross-device with a QR code) or with a **DigiD mock**, which checks nothing and provides the BSN only (stub, not conformant) |
-| mTLS, PAR, refresh tokens | not offered (see below) |
+| mTLS, PAR, refresh tokens                                                                                | not offered (see below)                                                                                                                                                                                                                                                                                               |
 
 ## Endpoints
 
-| Endpoint | |
-|---|---|
-| `GET /.well-known/oauth-authorization-server` | metadata (RFC 8414) |
-| `GET /jwks.json` | the public token signing key |
-| `GET /authorize` | authorization request: `response_type=code`, `client_id`, `redirect_uri`, `scope` (`verify`, `retrieve` or both; `issuance` for a credential issuer), `state`, `code_challenge`, `code_challenge_method=S256`, `resource` (one data service of the ASIP; the issuance resource of its organisation for a credential issuer), and optionally one RFC 9396 `authorization_details` object that binds the same resource and operations to selected attribute identifiers. A valid request gets the request page |
-| `POST /authorize/decision` | the user's choice on the request page: `transaction`, `decision` (`deny`, `digid` or `wallet`). Deny answers with the redirect to the client; `digid` leads to the DigiD mock; `wallet` opens a disclosure session and leads to the wallet page (refused when no verifier is configured, 503 when it is unreachable) |
-| `GET /authorize/wallet` | the NL Wallet: the same-device universal link and cross-device QR code of the disclosure session, refreshing itself; once the wallet disclosed the PID, the redirect to the client; when declined, expired or unusable, the request page again |
-| `GET /authorize/wallet/return` | return from a same-device wallet session: `transaction`, `session_token` and the verifier's return `nonce`; the session and browser must belong to that transaction before the disclosed PID is requested |
-| `GET`, `POST /authorize/digid` | the DigiD mock: the login page, and the login with `transaction`, `username` (ignored) and `bsn`; a login answers with the redirect to the client |
-| `POST /token` | token request: `grant_type=authorization_code`, `code`, `redirect_uri`, `code_verifier`, `client_assertion_type`, `client_assertion`, and a `DPoP` proof header |
-| `POST /register` | client registration (RFC 7591): `redirect_uris`, `scope`, optionally `token_endpoint_auth_method`, and the `software_statement` |
+| Endpoint                                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /.well-known/oauth-authorization-server` | metadata (RFC 8414)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `GET /jwks.json`                              | the public token signing key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `GET /authorize`                              | authorization request: `response_type=code`, `client_id`, `redirect_uri`, `scope` (`verify`, `retrieve` or both; `issuance` for a credential issuer), `state`, `code_challenge`, `code_challenge_method=S256`, `resource` (one data service of the ASIP; the issuance resource of its organisation for a credential issuer), and optionally one RFC 9396 `authorization_details` object that binds the same resource and operations to selected attribute identifiers. A valid request gets the request page |
+| `POST /authorize/decision`                    | the user's choice on the request page: `transaction`, `decision` (`deny`, `digid` or `wallet`). Deny answers with the redirect to the client; `digid` leads to the DigiD mock; `wallet` opens a disclosure session and leads to the wallet page (refused when no verifier is configured, 503 when it is unreachable)                                                                                                                                                                                         |
+| `GET /authorize/wallet`                       | the NL Wallet: the same-device universal link and cross-device QR code of the disclosure session, refreshing itself; once the wallet disclosed the PID, the redirect to the client; when declined, expired or unusable, the request page again                                                                                                                                                                                                                                                               |
+| `GET /authorize/wallet/return`                | return from a same-device wallet session: `transaction`, `session_token` and the verifier's return `nonce`; the session and browser must belong to that transaction before the disclosed PID is requested                                                                                                                                                                                                                                                                                                    |
+| `GET`, `POST /authorize/digid`                | the DigiD mock: the login page, and the login with `transaction`, `username` (ignored) and `bsn`; a login answers with the redirect to the client                                                                                                                                                                                                                                                                                                                                                            |
+| `POST /token`                                 | token request: `grant_type=authorization_code`, `code`, `redirect_uri`, `code_verifier`, `client_assertion_type`, `client_assertion`, and a `DPoP` proof header                                                                                                                                                                                                                                                                                                                                              |
+| `POST /register`                              | client registration (RFC 7591): `redirect_uris`, `scope`, optionally `token_endpoint_auth_method`, and the `software_statement`                                                                                                                                                                                                                                                                                                                                                                              |
 
 ## Run
 
@@ -43,11 +52,31 @@ cd services/asi-authorization-server
 AZSP_TRUST_ANCHORS_FILE=../../.local/secrets/development-ca/reader-ca-cert.pem go run .
 ```
 
-`make provision-asip-qtsp-certificate` issues a test QTSP certificate from the development reader CA, with the `organizationIdentifier` of the test QTSP in `testdata/register.json` (`NTRNL-90000001`). A test QTSP signs its software statement and its client assertions with its key.
+`make provision-asip-qtsp-certificate` issues a test QTSP certificate from the
+development reader CA, with the `organizationIdentifier` of the test QTSP in
+`testdata/register.json` (`NTRNL-90000001`). A test QTSP signs its software
+statement and its client assertions with its key.
 
-Configuration: `AZSP_ADDR` (default `:4021`), `AZSP_ISSUER` (the public base URL, default `http://localhost:4021`), `AZSP_RESOURCES` (per data service of the ASIP its base URL and the name of its authentic source, as `url=name` separated by commas, default `http://localhost:4020/brp/authsrc-api=Basisregistratie Personen (mock)`; the request page shows the name, so it is required), `AZSP_SIGNING_KEY_FILE` (PEM, ECDSA P-256; without it the server generates a key at start, so tokens do not survive a restart), `AZSP_CLIENTS_FILE`, `AZSP_REGISTER_FILE` (default `testdata/register.json`), `AZSP_TRUST_ANCHORS_FILE` (PEM; the roots QTSP certificates must chain to, the development reader CA; without it every registration is refused), `AZSP_ENTITLEMENT_RECHECK_INTERVAL` (default `1h`), `AZSP_REQUIRE_AUTHORIZATION_DETAILS` (default `false`; set to `true` to refuse authorization requests without the per-attribute RFC 9396 detail; it does not apply to issuance), `AZSP_ISSUANCE_RESOURCES` (the issuance resources of credential issuers, as `url=organizationIdentifier=name` separated by commas: the issuer identifier, the `organizationIdentifier` of the only client that may obtain tokens for it, and the name of its source; empty by default).
+Configuration: `AZSP_ADDR` (default `:4021`), `AZSP_ISSUER` (the public base
+URL, default `http://localhost:4021`), `AZSP_RESOURCES` (per data service of the
+ASIP its base URL and the name of its authentic source, as `url=name` separated
+by commas, default
+`http://localhost:4020/brp/authsrc-api=Basisregistratie Personen (mock)`; the
+request page shows the name, so it is required), `AZSP_SIGNING_KEY_FILE` (PEM,
+ECDSA P-256; without it the server generates a key at start, so tokens do not
+survive a restart), `AZSP_CLIENTS_FILE`, `AZSP_REGISTER_FILE` (default
+`testdata/register.json`), `AZSP_TRUST_ANCHORS_FILE` (PEM; the roots QTSP
+certificates must chain to, the development reader CA; without it every
+registration is refused), `AZSP_ENTITLEMENT_RECHECK_INTERVAL` (default `1h`),
+`AZSP_REQUIRE_AUTHORIZATION_DETAILS` (default `false`; set to `true` to refuse
+authorization requests without the per-attribute RFC 9396 detail; it does not
+apply to issuance), `AZSP_ISSUANCE_RESOURCES` (the issuance resources of
+credential issuers, as `url=organizationIdentifier=name` separated by commas:
+the issuer identifier, the `organizationIdentifier` of the only client that may
+obtain tokens for it, and the name of its source; empty by default).
 
-A clients file registers each client with its redirect URIs, its scopes and the public keys of its client assertions:
+A clients file registers each client with its redirect URIs, its scopes and the
+public keys of its client assertions:
 
 ```json
 {
@@ -62,109 +91,297 @@ A clients file registers each client with its redirect URIs, its scopes and the 
 }
 ```
 
-The reference QTSP ([`qtsp-reference`](../qtsp-reference)) runs the flow by hand; `internal/httpapi/e2e_test.go` runs the whole flow against a started `asi-provider`.
+The reference QTSP ([`qtsp-reference`](../qtsp-reference)) runs the flow by
+hand; `internal/httpapi/e2e_test.go` runs the whole flow against a started
+`asi-provider`.
 
 ## Dynamic client registration
 
-A QTSP registers once per authorization server, before its first authorization request, and keeps the `client_id` it gets back (RFC 7591). It finds the registration endpoint in the metadata.
+A QTSP registers once per authorization server, before its first authorization
+request, and keeps the `client_id` it gets back (RFC 7591). It finds the
+registration endpoint in the metadata.
 
-- **Software statement.** The QTSP signs it with the key of its X.509 certificate, ES256 or PS256, the chain in `x5c` (REQ-TSP-6.1.3.2-01). It must contain `iss`, `registryURI`, `iat` and `exp`; it must not be expired or issued in the future. There is no maximum lifetime: a replayed statement registers a client nobody can authenticate without the certificate key. Metadata in the statement take precedence over plain JSON members (RFC 7591 section 3.1.1).
-- **Certificate.** It must chain to a trust anchor, be valid now, allow digital signatures and carry an `organizationIdentifier`.
-- **Register.** The entry `registryURI` points to must carry the entitlement `https://uri.etsi.org/19475/Entitlement/QEAA_Provider` (Article 45e concerns QTSPs issuing qualified electronic attestations of attributes), or `https://uri.etsi.org/19475/Entitlement/PUB_EAA_Provider` for a credential issuer, and have the `organizationIdentifier` of the certificate among its identifiers. The scope decides which of the two the client needs: `verify` and `retrieve` need `QEAA_Provider`, `issuance` needs `PUB_EAA_Provider`, and `issuance` is never combined with the others (`invalid_client_metadata`). TS5 also uses `http://data.europa.eu/eudi/entitlement/...` in an example; only the form of its table is accepted.
-- **Client.** The key of the certificate is the client key for `private_key_jwt`; the response returns it in `jwks` with its `kid`. `jwks` and `jwks_uri` in the request are refused; `token_endpoint_auth_method` must be `private_key_jwt` and is that when omitted. The scope is `verify`, `retrieve` or both, or `issuance`; redirect URIs are absolute https URIs without fragment, or http on a loopback address (`localhost`, `127.0.0.1`, `[::1]`; RFC 8252 section 7.3), where browser and client run on the same machine, as the reference QTSP of the demo does.
-- **Errors** (RFC 7591 section 3.2.2): `invalid_software_statement` for the statement and the certificate, `unapproved_software_statement` for the register, `invalid_client_metadata` and `invalid_redirect_uri` for the metadata. When the register cannot be consulted, a registration gets 503 with `temporarily_unavailable`.
-- **Re-verification.** Every `AZSP_ENTITLEMENT_RECHECK_INTERVAL` the entitlement its scope needs of every registered client is looked up again (clause 6.1.3.2, figure 2). A client that is no longer approved is deactivated: its token requests are `invalid_client`, its authorization requests get the error page; tokens already issued expire normally. When the register cannot be consulted, the client stays active until the next successful check. **That is a demo choice, to be reassessed for production.** The stub register reads its file on every lookup: remove `QEAA_Provider` from an entry in `AZSP_REGISTER_FILE` and the next check deactivates its clients, without a restart. A file that cannot be read or parsed counts as an unavailable register.
-- **Storage.** Registered clients are kept in memory. After a restart of the authorization server a QTSP gets `invalid_client` and must register again; the reference client of slice 6 has to handle that. There is no client configuration endpoint (RFC 7592).
+- **Software statement.** The QTSP signs it with the key of its X.509
+  certificate, ES256 or PS256, the chain in `x5c` (REQ-TSP-6.1.3.2-01). It must
+  contain `iss`, `registryURI`, `iat` and `exp`; it must not be expired or
+  issued in the future. There is no maximum lifetime: a replayed statement
+  registers a client nobody can authenticate without the certificate key.
+  Metadata in the statement take precedence over plain JSON members (RFC 7591
+  section 3.1.1).
+- **Certificate.** It must chain to a trust anchor, be valid now, allow digital
+  signatures and carry an `organizationIdentifier`.
+- **Register.** The entry `registryURI` points to must carry the entitlement
+  `https://uri.etsi.org/19475/Entitlement/QEAA_Provider` (Article 45e concerns
+  QTSPs issuing qualified electronic attestations of attributes), or
+  `https://uri.etsi.org/19475/Entitlement/PUB_EAA_Provider` for a credential
+  issuer, and have the `organizationIdentifier` of the certificate among its
+  identifiers. The scope decides which of the two the client needs: `verify` and
+  `retrieve` need `QEAA_Provider`, `issuance` needs `PUB_EAA_Provider`, and
+  `issuance` is never combined with the others (`invalid_client_metadata`). TS5
+  also uses `http://data.europa.eu/eudi/entitlement/...` in an example; only the
+  form of its table is accepted.
+- **Client.** The key of the certificate is the client key for
+  `private_key_jwt`; the response returns it in `jwks` with its `kid`. `jwks`
+  and `jwks_uri` in the request are refused; `token_endpoint_auth_method` must
+  be `private_key_jwt` and is that when omitted. The scope is `verify`,
+  `retrieve` or both, or `issuance`; redirect URIs are absolute https URIs
+  without fragment, or http on a loopback address (`localhost`, `127.0.0.1`,
+  `[::1]`; RFC 8252 section 7.3), where browser and client run on the same
+  machine, as the reference QTSP of the demo does.
+- **Errors** (RFC 7591 section 3.2.2): `invalid_software_statement` for the
+  statement and the certificate, `unapproved_software_statement` for the
+  register, `invalid_client_metadata` and `invalid_redirect_uri` for the
+  metadata. When the register cannot be consulted, a registration gets 503 with
+  `temporarily_unavailable`.
+- **Re-verification.** Every `AZSP_ENTITLEMENT_RECHECK_INTERVAL` the entitlement
+  its scope needs of every registered client is looked up again (clause 6.1.3.2,
+  figure 2). A client that is no longer approved is deactivated: its token
+  requests are `invalid_client`, its authorization requests get the error page;
+  tokens already issued expire normally. When the register cannot be consulted,
+  the client stays active until the next successful check. **That is a demo
+  choice, to be reassessed for production.** The stub register reads its file on
+  every lookup: remove `QEAA_Provider` from an entry in `AZSP_REGISTER_FILE` and
+  the next check deactivates its clients, without a restart. A file that cannot
+  be read or parsed counts as an unavailable register.
+- **Storage.** Registered clients are kept in memory. After a restart of the
+  authorization server a QTSP gets `invalid_client` and must register again; the
+  reference client of slice 6 has to handle that. There is no client
+  configuration endpoint (RFC 7592).
 
 ## Layout
 
-Ports and adapters, as [`services/AGENTS.md`](../AGENTS.md) asks for a service with an authorization boundary:
+Ports and adapters, as [`services/AGENTS.md`](../AGENTS.md) asks for a service
+with an authorization boundary:
 
-| Package | |
-|---|---|
-| `internal/authorization` | the core: the authorization, token and registration requests, PKCE, codes, client authentication, DPoP proofs, token issuance, re-verification and the binding of a wallet return to its transaction and browser. Ports `Clients`, `Register` and `Identifier`: an identification means identifies the user behind the port, and the core names the means in the token |
-| `internal/clientconfig` | `Clients` from the configuration file |
-| `internal/stubregister` | `Register`: the stub register |
-| `internal/qtspcert` | the `provision-qtsp-certificate` command |
+| Package                   |                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `internal/authorization`  | the core: the authorization, token and registration requests, PKCE, codes, client authentication, DPoP proofs, token issuance, re-verification and the binding of a wallet return to its transaction and browser. Ports `Clients`, `Register` and `Identifier`: an identification means identifies the user behind the port, and the core names the means in the token            |
+| `internal/clientconfig`   | `Clients` from the configuration file                                                                                                                                                                                                                                                                                                                                             |
+| `internal/stubregister`   | `Register`: the stub register                                                                                                                                                                                                                                                                                                                                                     |
+| `internal/qtspcert`       | the `provision-qtsp-certificate` command                                                                                                                                                                                                                                                                                                                                          |
 | `internal/walletverifier` | the NL Wallet as identification means: the client of the verifier's API (start a disclosure session with its return template, obtain both device links, follow its status and read the disclosed PID with the return nonce when required), and the `provision-wallet-verifier` command: the reader certificate and configuration of the verifier (`services/asi-wallet-verifier`) |
-| `internal/digidmock` | `Identifier`: the DigiD mock, an adapter with its login page, in two files so it can move to a service of its own |
-| `internal/httpapi` | the endpoints, and the translation to the responses of RFC 6749 |
-| `main.go` | composition root |
+| `internal/digidmock`      | `Identifier`: the DigiD mock, an adapter with its login page, in two files so it can move to a service of its own                                                                                                                                                                                                                                                                 |
+| `internal/httpapi`        | the endpoints, and the translation to the responses of RFC 6749                                                                                                                                                                                                                                                                                                                   |
+| `main.go`                 | composition root                                                                                                                                                                                                                                                                                                                                                                  |
 
 ## The access token
 
 A JWT according to RFC 9068, signed with ES256, `typ` `at+jwt`, with:
 
-| Claim | |
-|---|---|
-| `iss`, `aud`, `exp`, `iat`, `jti`, `client_id` | RFC 9068 section 2.2; `aud` is the ASIP base URL (the issuer identifier for issuance), the lifetime is 10 minutes |
-| `sub` | an opaque value per token, so two tokens for one user cannot be linked through it (D3) |
-| `scope` | `verify`, `retrieve` or both: the operations ETSI TS 119 478 authorizes (clause 6.1.3.2); `issuance` for a credential issuer |
-| `authorization_details` | present when the request supplied the optional RFC 9396 detail approved by the user: its `locations`, `actions` and `attribute_identifiers` bind the token to one data service, the operation(s) and selected attributes; absent for ETSI operation-only authorization |
-| `cnf.jkt` | the thumbprint of the client's DPoP key (RFC 9449 section 6) |
-| `acr`, `amr` | the means that identified the user (RFC 9068 section 2.2.3.1): `nl-wallet` or `digid-mock` |
-| `https://gbo.example/claims/bsn` | the BSN of the user, **in plain text** (D3). The BSN has no entry in the IANA JWT registry, so the claim name is collision-resistant (RFC 9068 section 2.2.2); the namespace is provisional (D8). Slice 9 of #336 protects it |
+| Claim                                                                       |                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `iss`, `aud`, `exp`, `iat`, `jti`, `client_id`                              | RFC 9068 section 2.2; `aud` is the ASIP base URL (the issuer identifier for issuance), the lifetime is 10 minutes                                                                                                                                                                                                                                                                                |
+| `sub`                                                                       | an opaque value per token, so two tokens for one user cannot be linked through it (D3)                                                                                                                                                                                                                                                                                                           |
+| `scope`                                                                     | `verify`, `retrieve` or both: the operations ETSI TS 119 478 authorizes (clause 6.1.3.2); `issuance` for a credential issuer                                                                                                                                                                                                                                                                     |
+| `authorization_details`                                                     | present when the request supplied the optional RFC 9396 detail approved by the user: its `locations`, `actions` and `attribute_identifiers` bind the token to one data service, the operation(s) and selected attributes; absent for ETSI operation-only authorization                                                                                                                           |
+| `cnf.jkt`                                                                   | the thumbprint of the client's DPoP key (RFC 9449 section 6)                                                                                                                                                                                                                                                                                                                                     |
+| `acr`, `amr`                                                                | the means that identified the user (RFC 9068 section 2.2.3.1): `nl-wallet` or `digid-mock`                                                                                                                                                                                                                                                                                                       |
+| `https://gbo.example/claims/bsn`                                            | the BSN of the user, **in plain text** (D3). The BSN has no entry in the IANA JWT registry, so the claim name is collision-resistant (RFC 9068 section 2.2.2); the namespace is provisional (D8). Slice 9 of #336 protects it                                                                                                                                                                    |
 | `family_name`, `given_name`, `birthdate`, `place_of_birth`, `nationalities` | only when the means provides them, which DigiD does not (D7): the mandatory PID attributes of the user (CIR (EU) 2024/2977), under the names of the IANA JWT Claims Registry (RFC 9068 section 2.2.2), which the SD-JWT VC encoding of the PID rulebook uses too. `place_of_birth` is an object with `country`, `region` and/or `locality`; `nationalities` an array of ISO 3166-1 alpha-2 codes |
 
 The ASIP uses only the BSN; it does not check the PID claims.
 
 ## The request page and the DigiD mock
 
-A valid authorization request gets one page, in Dutch, with a banner that it is a test environment without real identification. Its title names the QTSP that gets consent ("Toestemming voor …"), by its legal name (the register entry for a registered client, taken again at every re-verification; `client_name` in the configuration; else the `client_id`). It says why: the user is requesting an attestation at the QTSP, which for that wants to have the authentic source verify their data ("laten controleren of uw gegevens kloppen"), retrieve them ("gegevens over u opvragen"), or both; and it lists who asks, what, where and, when supplied, which attributes. With attributes, a note says what the QTSP learns: for verification only whether the data are correct, not the data of the source; for retrieval the data themselves. Without attributes (an operation-only request) the list and the note leave them out. Under "Bevestig wie u bent" the page says that the user logs in to confirm that the data are theirs, so gives the QTSP consent for this request only, logs in at this service, not at the QTSP, and returns to the QTSP afterwards: the NL Wallet names the authorization server, whose reader certificate cannot name each QTSP. The user logs in with the NL Wallet or DigiD (mock), or denies: "Geen toestemming geven" asks nothing of the source and gives `access_denied`. Without a configured verifier the NL Wallet is shown but disabled.
+A valid authorization request gets one page, in Dutch, with a banner that it is
+a test environment without real identification. Its title names the QTSP that
+gets consent ("Toestemming voor …"), by its legal name (the register entry for a
+registered client, taken again at every re-verification; `client_name` in the
+configuration; else the `client_id`). It says why: the user is requesting an
+attestation at the QTSP, which for that wants to have the authentic source
+verify their data ("laten controleren of uw gegevens kloppen"), retrieve them
+("gegevens over u opvragen"), or both; and it lists who asks, what, where and,
+when supplied, which attributes. With attributes, a note says what the QTSP
+learns: for verification only whether the data are correct, not the data of the
+source; for retrieval the data themselves. Without attributes (an operation-only
+request) the list and the note leave them out. Under "Bevestig wie u bent" the
+page says that the user logs in to confirm that the data are theirs, so gives
+the QTSP consent for this request only, logs in at this service, not at the
+QTSP, and returns to the QTSP afterwards: the NL Wallet names the authorization
+server, whose reader certificate cannot name each QTSP. The user logs in with
+the NL Wallet or DigiD (mock), or denies: "Geen toestemming geven" asks nothing
+of the source and gives `access_denied`. Without a configured verifier the NL
+Wallet is shown but disabled.
 
-Choosing a means starts the approval; the grant is established only after the login succeeds (RFC 6749 section 3.1; ETSI TS 119 478 figure 3, step 9). There is no second confirmation page.
+Choosing a means starts the approval; the grant is established only after the
+login succeeds (RFC 6749 section 3.1; ETSI TS 119 478 figure 3, step 9). There
+is no second confirmation page.
 
-- The pages have a government look in the colours of the demo's consent portal: the coat of arms, the ribbon and Rijksblauw (`static/azsp.css`), and no name of an organisation; the header names the service, "Inloggen en toestemming geven". The demo shows several parties, and this look sets the login and consent service apart from the QTSP, which has a green look of its own. The style sheet and images are served from `/static/`; the pages have no script and no inline style (`Content-Security-Policy: style-src 'self'`).
-- The DigiD mock (`internal/digidmock`) is an adapter of the core's `Identifier` port: the web layer passes on what the user typed, and the core has the means identify the user and names the means itself. Its page is laid out like the DigiD mock of the toestemmingsportaal: first "Hoe wilt u inloggen?" with four methods (DigiD app, sms-controle, rijbewijs, identiteitskaart), then the form, prefilled with username `j.dejong` and the BSN `999991772` of test person Frouke Jansen. The method makes no difference; the username is ignored and the password field carries the BSN. Its style sheet and images are served from `/static/`. A BSN that is not nine digits keeps the page open with an error; there is no eleven-test, because not every BSN of the demo's test data passes it. A nine-digit BSN the source does not know logs in, and the ASIP answers `Unknown`. It is not real DigiD.
-- With DigiD the token carries the BSN only, with `acr`/`amr` `digid-mock`: DigiD provides no further identification data. Read literally, REQ-AZSP-6.1.3.1-08 asks for the identification data of the user; this is a GBO interpretation (D7).
-- The request waits as a transaction: kept server-side, valid for 5 minutes, used once, and bound to the browser by an HttpOnly, SameSite=Strict cookie set with the page. A choice or login for an unknown, used or expired transaction, or without the cookie, gets an error page, not a redirect.
+- The pages have a government look in the colours of the demo's consent portal:
+  the coat of arms, the ribbon and Rijksblauw (`static/azsp.css`), and no name
+  of an organisation; the header names the service, "Inloggen en toestemming
+  geven". The demo shows several parties, and this look sets the login and
+  consent service apart from the QTSP, which has a green look of its own. The
+  style sheet and images are served from `/static/`; the pages have no script
+  and no inline style (`Content-Security-Policy: style-src 'self'`).
+- The DigiD mock (`internal/digidmock`) is an adapter of the core's `Identifier`
+  port: the web layer passes on what the user typed, and the core has the means
+  identify the user and names the means itself. Its page is laid out like the
+  DigiD mock of the toestemmingsportaal: first "Hoe wilt u inloggen?" with four
+  methods (DigiD app, sms-controle, rijbewijs, identiteitskaart), then the form,
+  prefilled with username `j.dejong` and the BSN `999991772` of test person
+  Frouke Jansen. The method makes no difference; the username is ignored and the
+  password field carries the BSN. Its style sheet and images are served from
+  `/static/`. A BSN that is not nine digits keeps the page open with an error;
+  there is no eleven-test, because not every BSN of the demo's test data passes
+  it. A nine-digit BSN the source does not know logs in, and the ASIP answers
+  `Unknown`. It is not real DigiD.
+- With DigiD the token carries the BSN only, with `acr`/`amr` `digid-mock`:
+  DigiD provides no further identification data. Read literally,
+  REQ-AZSP-6.1.3.1-08 asks for the identification data of the user; this is a
+  GBO interpretation (D7).
+- The request waits as a transaction: kept server-side, valid for 5 minutes,
+  used once, and bound to the browser by an HttpOnly, SameSite=Strict cookie set
+  with the page. A choice or login for an unknown, used or expired transaction,
+  or without the cookie, gets an error page, not a redirect.
 - The pages are not cached and may not be framed.
 
 ## The NL Wallet
 
-With the NL Wallet the authorization server has the citizen disclose the PID through nl-wallet's `verification_server` (`services/asi-wallet-verifier`), behind the core's `SessionIdentifier` port (`internal/walletverifier`):
+With the NL Wallet the authorization server has the citizen disclose the PID
+through nl-wallet's `verification_server` (`services/asi-wallet-verifier`),
+behind the core's `SessionIdentifier` port (`internal/walletverifier`):
 
-- choosing the wallet opens a disclosure session for usecase `asi-login` that asks `bsn`, `family_name`, `given_name`, `birthdate` and `nationalities` of `urn:eudi:pid:nl:1`. The core keeps the session with the transaction and never takes one from the browser, so a finished session cannot be carried over to another transaction;
-- the wallet page always offers the universal link as “Open NL Wallet” and the cross-device QR code. On a narrow screen CSS puts the button first. It refreshes every two seconds and has no script, so the strict CSP stays (it allows `data:` images). Because nl-wallet accepts only an HTTPS return template, a local HTTP issuer shows the same-device button disabled with an explanation while the QR flow remains available;
-- for an HTTPS issuer, the session start carries a return template for `/authorize/wallet/return`. The verifier is provisioned with `session_type_return_url = "same_device"`: the wallet returns only a same-device browser, with the session token and a verifier nonce. The core first checks that the session is the one stored with this browser's transaction and only then asks the verifier for the PID with that nonce. Cross-device login continues to use the polling page, including when the optional same-device link cannot be obtained;
-- when the wallet disclosed the PID, the core logs the user in: the token carries the BSN, the four PID attributes and `acr`/`amr` `nl-wallet`. The NL PID has no place of birth, so one of the five mandatory PID attributes is missing;
-- declined in the wallet or expired, a return without the correct nonce, or a disclosure without a BSN or of another type: the request page again, with why, and the transaction stays. A verifier that cannot be reached, fails or refuses the API key, also when it fetches the disclosed attributes of a finished session: a 503 page, and the transaction stays for DigiD (mock). A run with the real wallet on one phone, in the simulation environment where the route runs over HTTPS, is still to be done.
+- choosing the wallet opens a disclosure session for usecase `asi-login` that
+  asks `bsn`, `family_name`, `given_name`, `birthdate` and `nationalities` of
+  `urn:eudi:pid:nl:1`. The core keeps the session with the transaction and never
+  takes one from the browser, so a finished session cannot be carried over to
+  another transaction;
+- the wallet page always offers the universal link as “Open NL Wallet” and the
+  cross-device QR code. On a narrow screen CSS puts the button first. It
+  refreshes every two seconds and has no script, so the strict CSP stays (it
+  allows `data:` images). Because nl-wallet accepts only an HTTPS return
+  template, a local HTTP issuer shows the same-device button disabled with an
+  explanation while the QR flow remains available;
+- for an HTTPS issuer, the session start carries a return template for
+  `/authorize/wallet/return`. The verifier is provisioned with
+  `session_type_return_url = "same_device"`: the wallet returns only a
+  same-device browser, with the session token and a verifier nonce. The core
+  first checks that the session is the one stored with this browser's
+  transaction and only then asks the verifier for the PID with that nonce.
+  Cross-device login continues to use the polling page, including when the
+  optional same-device link cannot be obtained;
+- when the wallet disclosed the PID, the core logs the user in: the token
+  carries the BSN, the four PID attributes and `acr`/`amr` `nl-wallet`. The NL
+  PID has no place of birth, so one of the five mandatory PID attributes is
+  missing;
+- declined in the wallet or expired, a return without the correct nonce, or a
+  disclosure without a BSN or of another type: the request page again, with why,
+  and the transaction stays. A verifier that cannot be reached, fails or refuses
+  the API key, also when it fetches the disclosed attributes of a finished
+  session: a 503 page, and the transaction stays for DigiD (mock). A run with
+  the real wallet on one phone, in the simulation environment where the route
+  runs over HTTPS, is still to be done.
 
-Configuration: `AZSP_WALLET_VERIFIER_URL` (internal API), `AZSP_WALLET_VERIFIER_STATUS_URL` (wallet API, for the session status) and `AZSP_WALLET_VERIFIER_API_KEY_FILE`, read at startup; without the key file the wallet is not offered. Compose mounts only the directory with the key, not the verifier's configuration. `make demo-asi` reprovisions when the return mode required by `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` differs from the current configuration. Run `make provision-asi-wallet-verifier` again after changing that URL's host: the reader certificate also binds the origin.
+Configuration: `AZSP_WALLET_VERIFIER_URL` (internal API),
+`AZSP_WALLET_VERIFIER_STATUS_URL` (wallet API, for the session status) and
+`AZSP_WALLET_VERIFIER_API_KEY_FILE`, read at startup; without the key file the
+wallet is not offered. Compose mounts only the directory with the key, not the
+verifier's configuration. `make demo-asi` reprovisions when the return mode
+required by `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` differs from the current
+configuration. Run `make provision-asi-wallet-verifier` again after changing
+that URL's host: the reader certificate also binds the origin.
 
 ## The EUDI wallets
 
-With an EUDI wallet the citizen logs in the same way, through `services/eudi-wallet-verifier` (#639): OpenID4VP 1.0 as HAIP 1.0 profiles it, on the verifier of `oid4vc-kit`, behind the same API and the same client (`internal/walletverifier`) as the NL Wallet. The core names it `eudi-wallet`, in the token's `acr` and `amr`.
+With an EUDI wallet the citizen logs in the same way, through
+`services/eudi-wallet-verifier` (#639): OpenID4VP 1.0 as HAIP 1.0 profiles it,
+on the verifier of `oid4vc-kit`, behind the same API and the same client
+(`internal/walletverifier`) as the NL Wallet. The core names it `eudi-wallet`,
+in the token's `acr` and `amr`.
 
-- The request page shows “Inloggen met EU-wallet (test)” only when its verifier is configured; the NL Wallet's button does not depend on it.
-- The wallet page and its return have their own paths, `/authorize/eudi-wallet` and `/authorize/eudi-wallet/return`. The links are `openid4vp://`; the page passes them through only for that scheme and `https`.
-- The usecase `asi-login` asks the same claims of `urn:eudi:pid:nl:1`. The verifier adds its trusted authorities, refuses a PID that is revoked or whose status cannot be determined, and releases the PID of a same-device session only with the return's nonce.
-- For both wallets, a same-device session that is done does not log in through the waiting page, which has no nonce: the page keeps waiting for the return (HAIP 1.0 section 5.1).
+- The request page shows “Inloggen met EU-wallet (test)” only when its verifier
+  is configured; the NL Wallet's button does not depend on it.
+- The wallet page and its return have their own paths, `/authorize/eudi-wallet`
+  and `/authorize/eudi-wallet/return`. The links are `openid4vp://`; the page
+  passes them through only for that scheme and `https`.
+- The usecase `asi-login` asks the same claims of `urn:eudi:pid:nl:1`. The
+  verifier adds its trusted authorities, refuses a PID that is revoked or whose
+  status cannot be determined, and releases the PID of a same-device session
+  only with the return's nonce.
+- For both wallets, a same-device session that is done does not log in through
+  the waiting page, which has no nonce: the page keeps waiting for the return
+  (HAIP 1.0 section 5.1).
 
-Configuration: `AZSP_EUDI_WALLET_VERIFIER_URL`, `AZSP_EUDI_WALLET_VERIFIER_STATUS_URL` and `AZSP_EUDI_WALLET_VERIFIER_API_KEY_FILE` (default `/eudi-wallet-verifier/api-key`), as for the NL Wallet.
+Configuration: `AZSP_EUDI_WALLET_VERIFIER_URL`,
+`AZSP_EUDI_WALLET_VERIFIER_STATUS_URL` and
+`AZSP_EUDI_WALLET_VERIFIER_API_KEY_FILE` (default
+`/eudi-wallet-verifier/api-key`), as for the NL Wallet.
 
 ## Credential issuers as clients
 
-GBO's credential issuer issues a source's attestation (a PuB-EAA) to a wallet. With the authorization code flow, the citizen identifies here, at the same service and with the same means as for the ASI, instead of disclosing a PID. The issuer is a client of this server per source, with the source's access certificate:
+GBO's credential issuer issues a source's attestation (a PuB-EAA) to a wallet.
+With the authorization code flow, the citizen identifies here, at the same
+service and with the same means as for the ASI, instead of disclosing a PID. The
+issuer is a client of this server per source, with the source's access
+certificate:
 
-- It registers like a QTSP, with a register entry that carries `PUB_EAA_Provider` and scope `issuance`.
-- An issuance resource (`AZSP_ISSUANCE_RESOURCES`) is the issuer identifier of one source. Only the client whose certificate has the `organizationIdentifier` configured for it obtains tokens for it; any other client gets `invalid_target`. A credential issuer never obtains a token for a data service of the ASIP, and a QTSP never one for an issuance resource.
-- An issuance request may name its credential configurations in `authorization_details` of type `openid_credential` (RFC 9396, OpenID4VCI 1.0 section 5.1.1). The server reads their names and the names of their claims from the issuer's unsigned metadata at its well-known URL (OpenID4VCI 1.0 section 12.2.4), in Dutch where the metadata has it, and the request page shows them. A configuration the issuer does not have, or details that are not a JSON array of `openid_credential` details, is `invalid_authorization_details`; the ASI type is `invalid_request`. When the metadata cannot be read within 3 seconds, the page names no credential.
-- The request page says: "Toestemming voor <source>", "U vraagt bij <source> een attestatie aan voor uw wallet. <source> haalt daarvoor uw gegevens op.", and then the credential and the data it holds, or "Een attestatie voor uw wallet" when the request or the metadata does not say.
-- The token has the issuer identifier as `aud` and scope `issuance`, and carries the BSN like any other token. The issuer validates it itself; the ASIP refuses it.
+- It registers like a QTSP, with a register entry that carries
+  `PUB_EAA_Provider` and scope `issuance`.
+- An issuance resource (`AZSP_ISSUANCE_RESOURCES`) is the issuer identifier of
+  one source. Only the client whose certificate has the `organizationIdentifier`
+  configured for it obtains tokens for it; any other client gets
+  `invalid_target`. A credential issuer never obtains a token for a data service
+  of the ASIP, and a QTSP never one for an issuance resource.
+- An issuance request may name its credential configurations in
+  `authorization_details` of type `openid_credential` (RFC 9396, OpenID4VCI 1.0
+  section 5.1.1). The server reads their names and the names of their claims
+  from the issuer's unsigned metadata at its well-known URL (OpenID4VCI 1.0
+  section 12.2.4), in Dutch where the metadata has it, and the request page
+  shows them. A configuration the issuer does not have, or details that are not
+  a JSON array of `openid_credential` details, is
+  `invalid_authorization_details`; the ASI type is `invalid_request`. When the
+  metadata cannot be read within 3 seconds, the page names no credential.
+- The request page says: "Toestemming voor <source>", "U vraagt bij <source> een
+  attestatie aan voor uw wallet. <source> haalt daarvoor uw gegevens op.", and
+  then the credential and the data it holds, or "Een attestatie voor uw wallet"
+  when the request or the metadata does not say.
+- The token has the issuer identifier as `aud` and scope `issuance`, and carries
+  the BSN like any other token. The issuer validates it itself; the ASIP refuses
+  it.
 
-ETSI TS 119 478 covers verification and retrieval by a (Q)TSP at the ASIP; it says nothing of other clients or resources of the same server. This use lies outside it. The ASI part is unchanged: a token for a data service still goes only to a client with `QEAA_Provider`.
+ETSI TS 119 478 covers verification and retrieval by a (Q)TSP at the ASIP; it
+says nothing of other clients or resources of the same server. This use lies
+outside it. The ASI part is unchanged: a token for a data service still goes
+only to a client with `QEAA_Provider`.
 
 ## Interpretations and choices
 
-The security considerations of clause 6.1.3.4 (RFC 9700, FAPI 2.0, RFC 7636, RFC 6819) are weighed item by item in [`conformance/security-considerations.md`](../../conformance/security-considerations.md); an overview of the whole route is in [`docs/asi-route.md`](../../docs/asi-route.md).
+The security considerations of clause 6.1.3.4 (RFC 9700, FAPI 2.0, RFC 7636,
+RFC 6819) are weighed item by item in
+[`conformance/security-considerations.md`](../../conformance/security-considerations.md);
+an overview of the whole route is in
+[`docs/asi-route.md`](../../docs/asi-route.md).
 
-
-- **One mechanism of each.** REQ-AZSP-6.1.3.1-05 and -06 require mTLS or `private_key_jwt`, and mTLS or DPoP. This server offers `private_key_jwt` and DPoP. A production deployment should consider mTLS.
-- **No PAR.** The FAPI 2.0 Security Profile requires pushed authorization requests; ETSI TS 119 478 only asks to "take into account" FAPI 2.0 (REQ-AZSP-6.1.3.4-01). A stricter server than ETSI would exclude QTSPs that implement ETSI only.
-- **Algorithms.** Tokens are signed with ES256. Client assertions may use ES256 or PS256, DPoP proofs ES256. RFC 9068 section 2.1 requires resource servers to support RS256, which FAPI 2.0 does not allow; the ASIP accepts it, this server never uses it.
-- **Authorization per operation, optionally per selected attribute.** ETSI TS 119 478 defines the scopes `verify` and `retrieve`, but not a token binding to attributes. A request without `authorization_details` therefore produces an operation-only token. When a request supplies RFC 9396 `authorization_details` with the provisional type `https://gbo.example/authorization-details/authentic-source-attributes`, the authorization server validates it against `resource` and `scope`, shows its attributes, and copies it through the code into the token. A deployment can require that detail with `AZSP_REQUIRE_AUTHORIZATION_DETAILS=true` while the Dutch policy choice remains open.
-- **Resource indicator.** `resource` (RFC 8707) is required on the authorization request and names exactly one data service of the ASIP: with several there is no default, and a token is for one data service, its `aud`. A token request may repeat it or leave it out. Anything else is `invalid_target`. A QTSP that verifies attributes of two authentic sources authorizes twice, and the request page names the authentic source of each.
-- **Codes** are single-use and valid for 60 seconds; a code presented by another client or with another `redirect_uri` is consumed and refused.
-- **Clock leeway**: 30 seconds on client assertions; DPoP proofs are accepted within 60 seconds of their `iat` and only once.
+- **One mechanism of each.** REQ-AZSP-6.1.3.1-05 and -06 require mTLS or
+  `private_key_jwt`, and mTLS or DPoP. This server offers `private_key_jwt` and
+  DPoP. A production deployment should consider mTLS.
+- **No PAR.** The FAPI 2.0 Security Profile requires pushed authorization
+  requests; ETSI TS 119 478 only asks to "take into account" FAPI 2.0
+  (REQ-AZSP-6.1.3.4-01). A stricter server than ETSI would exclude QTSPs that
+  implement ETSI only.
+- **Algorithms.** Tokens are signed with ES256. Client assertions may use ES256
+  or PS256, DPoP proofs ES256. RFC 9068 section 2.1 requires resource servers to
+  support RS256, which FAPI 2.0 does not allow; the ASIP accepts it, this server
+  never uses it.
+- **Authorization per operation, optionally per selected attribute.** ETSI TS
+  119 478 defines the scopes `verify` and `retrieve`, but not a token binding to
+  attributes. A request without `authorization_details` therefore produces an
+  operation-only token. When a request supplies RFC 9396 `authorization_details`
+  with the provisional type
+  `https://gbo.example/authorization-details/authentic-source-attributes`, the
+  authorization server validates it against `resource` and `scope`, shows its
+  attributes, and copies it through the code into the token. A deployment can
+  require that detail with `AZSP_REQUIRE_AUTHORIZATION_DETAILS=true` while the
+  Dutch policy choice remains open.
+- **Resource indicator.** `resource` (RFC 8707) is required on the authorization
+  request and names exactly one data service of the ASIP: with several there is
+  no default, and a token is for one data service, its `aud`. A token request
+  may repeat it or leave it out. Anything else is `invalid_target`. A QTSP that
+  verifies attributes of two authentic sources authorizes twice, and the request
+  page names the authentic source of each.
+- **Codes** are single-use and valid for 60 seconds; a code presented by another
+  client or with another `redirect_uri` is consumed and refused.
+- **Clock leeway**: 30 seconds on client assertions; DPoP proofs are accepted
+  within 60 seconds of their `iat` and only once.
 - No log line contains the BSN.

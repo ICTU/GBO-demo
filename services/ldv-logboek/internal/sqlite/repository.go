@@ -149,7 +149,7 @@ func (r *Repository) Get(ctx context.Context, traceID, spanID string) (ldv.Store
 }
 
 // Query answers a read on one of the three axes. The core has already
-// validated that exactly one selector is set and capped the limit, so this
+// validated that at least one selector is set and capped the limit, so this
 // builds the WHERE clause from whatever is present.
 func (r *Repository) Query(ctx context.Context, query ldv.Query) ([]ldv.Stored, error) {
 	conditions := make([]string, 0, 3)

@@ -12,27 +12,27 @@ other BSN. Anything else is a 400.
 
 The values take the forms of the NL Wallet's own PID issuer:
 
-| PID claim | BRP mock |
-|---|---|
-| `bsn` | `bsn` |
-| `given_name` | `voornamen` |
-| `family_name` | `voorvoegsel` and `geslachtsnaam` |
-| `birthdate` | `geboortedatum` |
-| `age_over_18` | the date in Amsterdam; born on 29 February, 18 on 1 March in a common year |
-| `nationalities` | descriptions of `heeftNationaliteit[].nationaliteit` (`Nederlandse`, `Belgische`, `Duitse`) |
-| `address` | `woontOpBinnenland`: street, house number with letter and addition without spaces (`12B`), postal code without a space, place, country `Nederland`; left out for a person without an address in the Netherlands |
+| PID claim       | BRP mock                                                                                                                                                                                                        |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bsn`           | `bsn`                                                                                                                                                                                                           |
+| `given_name`    | `voornamen`                                                                                                                                                                                                     |
+| `family_name`   | `voorvoegsel` and `geslachtsnaam`                                                                                                                                                                               |
+| `birthdate`     | `geboortedatum`                                                                                                                                                                                                 |
+| `age_over_18`   | the date in Amsterdam; born on 29 February, 18 on 1 March in a common year                                                                                                                                      |
+| `nationalities` | descriptions of `heeftNationaliteit[].nationaliteit` (`Nederlandse`, `Belgische`, `Duitse`)                                                                                                                     |
+| `address`       | `woontOpBinnenland`: street, house number with letter and addition without spaces (`12B`), postal code without a space, place, country `Nederland`; left out for a person without an address in the Netherlands |
 
 A person the stub cannot map (a duplicate BSN, an unreadable birthdate, an
 unknown nationality) stops it at startup.
 
 `recovery_code`, which the NL Wallet's own PID carries, is left out.
 
-The stub returns no PID metadata. The credential issuer adds
-`issuing_authority` (`GBO Demo`), `issuing_country` (`NL`) and
-`date_of_expiry`, and for an EUDI wallet `iss` (the test PID's credential
-issuer identifier, named in its issuer certificate).
+The stub returns no PID metadata. The credential issuer adds `issuing_authority`
+(`GBO Demo`), `issuing_country` (`NL`) and `date_of_expiry`, and for an EUDI
+wallet `iss` (the test PID's credential issuer identifier, named in its issuer
+certificate).
 
-| Variable | |
-|---|---|
+| Variable       |                                      |
+| -------------- | ------------------------------------ |
 | `PERSONS_FILE` | the BRP mock persons file (required) |
-| `ADDR` | listen address, default `:8080` |
+| `ADDR`         | listen address, default `:8080`      |

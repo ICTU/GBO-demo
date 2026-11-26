@@ -1,0 +1,6 @@
+# Commits that only reformat, left out of git blame. Enable once per clone:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub's blame view reads this file by itself.
+
+# Reformat all Markdown with make md-fmt
+98228886fb0f09d34a7d6ad033111cd017aa25e3

@@ -387,6 +387,27 @@ jobs:
       - name: Test Manager seed authentication
         run: python3 -m unittest scripts/test_seed_openftv_manager.py
 
+  # Runs on every change: a new directory or a moved file can break a node.
+  # All logic lives in the script, so another CI system needs only these
+  # two steps.
+  intent-layer:
+    name: Intent Layer — structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: scripts/intent-layer.sh check
+        run: ./scripts/intent-layer.sh check
+
+  # Runs on every change. All logic lives in the script (oxfmt at a pinned
+  # version, run through npx), so another CI system needs only these steps.
+  markdown:
+    name: Markdown — format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: make md-check
+        run: make md-check
+
   docker:
     name: Docker — build (${{ matrix.service }})
     needs: changes
@@ -448,7 +469,7 @@ jobs:
   result:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [changes, go, conformance, source-registry, credential-issuer-db, credential-issuer-interop, rego, schema-drift, safety, image-manifest, chart, frontend, scripts, docker]
+    needs: [changes, go, conformance, source-registry, credential-issuer-db, credential-issuer-interop, rego, schema-drift, safety, image-manifest, chart, frontend, scripts, intent-layer, markdown, docker]
     if: always()
     steps:
       - name: Evaluate job results

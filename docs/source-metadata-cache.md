@@ -7,39 +7,38 @@ formatterfallback.
 
 ## Procesconfiguratie
 
-| Proces | Instelling | Betekenis |
-|---|---|---|
-| Reconciler | `--type-metadata-base-url` | Publieke basis-URL van de adapter; lokaal afgeleid uit `EUDI_BRI_URL`. |
-| Reconciler | `SOURCE_REGISTRY_DATABASE_URL` | Read-write PostgreSQL-verbinding voor kandidaten, statussen en atomische promotie. |
-| Adapter | `SOURCE_REGISTRY_DATABASE_URL` | Alleen-lezen verbinding; de adapter wisselt zijn complete in-memory release atomair. |
-| Alle registry-clients | `SOURCE_REGISTRY_SCHEMA` | Logisch schema, standaard `source_registry`. |
-| Adapter | `SOURCE_REGISTRY_REFRESH_INTERVAL` | Interval waarmee de actieve releasepointer en lichte lifecycle-observaties worden gecontroleerd. |
-| Issuance init-container | `SOURCE_REGISTRY_DATABASE_URL` | Alleen-lezen verbinding om één actieve release te materialiseren. |
+| Proces                  | Instelling                         | Betekenis                                                                                        |
+| ----------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Reconciler              | `--type-metadata-base-url`         | Publieke basis-URL van de adapter; lokaal afgeleid uit `EUDI_BRI_URL`.                           |
+| Reconciler              | `SOURCE_REGISTRY_DATABASE_URL`     | Read-write PostgreSQL-verbinding voor kandidaten, statussen en atomische promotie.               |
+| Adapter                 | `SOURCE_REGISTRY_DATABASE_URL`     | Alleen-lezen verbinding; de adapter wisselt zijn complete in-memory release atomair.             |
+| Alle registry-clients   | `SOURCE_REGISTRY_SCHEMA`           | Logisch schema, standaard `source_registry`.                                                     |
+| Adapter                 | `SOURCE_REGISTRY_REFRESH_INTERVAL` | Interval waarmee de actieve releasepointer en lichte lifecycle-observaties worden gecontroleerd. |
+| Issuance init-container | `SOURCE_REGISTRY_DATABASE_URL`     | Alleen-lezen verbinding om één actieve release te materialiseren.                                |
 
 OIN, type-id, transport, query, mapping en eventuele FSC-servicebinding worden
 uit het activatierecord gelezen en niet als losse runtimevariabelen
 geconfigureerd. Eén `SourceRelease` bevat immutable typen, offers en publieke
 certificaatidentiteiten van de volledige bronset. De observatietijden voor
 freshness en stale grace horen niet bij de release-identiteit en mogen bij een
-succesvolle hercontrole worden verlengd. Private keys en secretpaden hebben
-geen representatie in het registry-model.
+succesvolle hercontrole worden verlengd. Private keys en secretpaden hebben geen
+representatie in het registry-model.
 
 ## Ophalen en geldigheid
 
 - Alleen de reconciler haalt bronmetadata op, via het handmatig geregistreerde
-  transport en metadata-endpoint. De issuance-runtime pollt bronnen of FSC
-  nooit zelf.
-- Met een ETag stuurt de reconciler bij de volgende controle
-  `If-None-Match`. Een `304` verlengt alleen de cachetermijn; iedere `200` wordt
-  opnieuw volledig gevalideerd.
-- GBO weigert versieterugdraaiing en gewijzigde bytes onder dezelfde versie.
-  Een ongeldige kandidaat vervangt de laatste complete kandidaat niet.
+  transport en metadata-endpoint. De issuance-runtime pollt bronnen of FSC nooit
+  zelf.
+- Met een ETag stuurt de reconciler bij de volgende controle `If-None-Match`.
+  Een `304` verlengt alleen de cachetermijn; iedere `200` wordt opnieuw volledig
+  gevalideerd.
+- GBO weigert versieterugdraaiing en gewijzigde bytes onder dezelfde versie. Een
+  ongeldige kandidaat vervangt de laatste complete kandidaat niet.
 - Bij acceptatie moet minimaal één uur brongeldigheid resteren. Een succesvolle
   controle is maximaal vijftien minuten fresh en daarna maximaal één uur stale,
   nooit langer dan `expires_at` van de bron.
 - De actieve issuance-route toont de toestand als
-  `X-GBO-Metadata-Cache: fresh|stale` en antwoordt buiten stale grace met
-  `503`.
+  `X-GBO-Metadata-Cache: fresh|stale` en antwoordt buiten stale grace met `503`.
 
 ## Type Metadata
 
@@ -48,7 +47,8 @@ geen representatie in het registry-model.
 - GBO voegt `vct` en `vct#integrity` toe en berekent de integriteitswaarde over
   precies de immutable bytes die via die VCT-URL worden geserveerd.
 - GBO genereert de volledige Type Metadata uit `display` en `claims` van het
-  brondocument; zie [Claims en Type Metadata](source-onboarding.md#claims-en-type-metadata).
+  brondocument; zie
+  [Claims en Type Metadata](source-onboarding.md#claims-en-type-metadata).
 - Iedere `{{placeholder}}` in een wallet-`summary` moet een claimnaam zijn;
   iedere claim krijgt `svg_id` gelijk aan die naam.
 - Gepubliceerde typeversies worden niet automatisch verwijderd. Een
@@ -64,15 +64,14 @@ attributes meegestuurd.
 ## Kandidaten, releases en rollout
 
 De reconciler schrijft complete kandidaten en de actuele status per bron naar
-PostgreSQL. `--auto-promote` bouwt alleen wanneer *iedere* handmatig
+PostgreSQL. `--auto-promote` bouwt alleen wanneer _iedere_ handmatig
 geconfigureerde bron bruikbaar is een `SourceRelease`. De release-inhoud en
-release-ID blijven gelijk wanneer een `304` alleen de observatietijden
-verlengt; de bestaande lifecycle-kolommen worden dan bijgewerkt zonder nieuwe
-release of Type Metadata-kopieën te maken. De release en de singleton
-`active_release_id` worden in één transactie geschreven. Een `pending`,
-`stale` of `blocked` bron verhindert promotie, zodat een bron niet stil uit het
-aanbod verdwijnt. Een mislukte promotie laat de vorige actieve release
-ongemoeid.
+release-ID blijven gelijk wanneer een `304` alleen de observatietijden verlengt;
+de bestaande lifecycle-kolommen worden dan bijgewerkt zonder nieuwe release of
+Type Metadata-kopieën te maken. De release en de singleton `active_release_id`
+worden in één transactie geschreven. Een `pending`, `stale` of `blocked` bron
+verhindert promotie, zodat een bron niet stil uit het aanbod verdwijnt. Een
+mislukte promotie laat de vorige actieve release ongemoeid.
 
 De adapter controleert de actieve pointer en bouwt een nieuwe release volledig
 in geheugen voordat hij die atomair wisselt. Bij hetzelfde release-ID worden
