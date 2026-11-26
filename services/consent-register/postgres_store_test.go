@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -118,7 +119,7 @@ func TestPostgreSQLStorePersistsConsent(t *testing.T) {
 		t.Fatalf("unexpected filtered consents: %+v", filtered)
 	}
 
-	revoked, ok, err := reopened.Revoke(ctx, consentID, noRecord)
+	revoked, ok, err := reopened.Revoke(ctx, consentID, time.Now(), noRecord)
 	if err != nil {
 		t.Fatalf("revoke consent: %v", err)
 	}
@@ -239,5 +240,79 @@ func TestPostgreSQLStoreKeepsThePolymorphicValues(t *testing.T) {
 	got, ok, err := reopened.PolymorphicFor(ctx, subjectRef)
 	if err != nil || !ok || got != (Polymorphic{PI: "signed-PI", PP: "signed-PP"}) {
 		t.Errorf("after reopening: %+v, ok %v, err %v; want the first pair", got, ok, err)
+	}
+}
+
+// Only an active consent is revoked (#600): an expired or revoked one keeps
+// its status, its record is not written, and an unknown one is not found.
+func TestPostgreSQLStoreRevokesOnlyAnActiveConsent(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	store, err := NewPostgreSQLStore(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("create PostgreSQL store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	tests := []struct {
+		name       string
+		status     string
+		validUntil time.Time
+		wantErr    error
+	}{
+		{"active", "ACTIVE", now.Add(time.Hour), nil},
+		{"expired", "ACTIVE", now.Add(-time.Hour), errNotRevocable},
+		{"revoked", "REVOKED", now.Add(time.Hour), errNotRevocable},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			consentID := "test-" + uuid.NewString()
+			marker := `{"test_revocation": "` + consentID + `"}`
+			t.Cleanup(func() {
+				_, _ = store.pool.Exec(ctx, "DELETE FROM consents WHERE consent_id = $1", consentID)
+				_, _ = store.pool.Exec(ctx, "DELETE FROM ldv_outbox WHERE record = $1::jsonb", marker)
+			})
+			if err := store.Create(ctx, &Consent{
+				ConsentID: consentID, Status: tc.status, SubjectRef: "EP-portal-revoke",
+				DienstverlenrOIN: "99999999900000001400", Scopes: []string{"inkomen:read"},
+				UseCase: "hypotheek", CreatedAt: now, ValidUntil: tc.validUntil,
+			}, nil); err != nil {
+				t.Fatalf("create consent: %v", err)
+			}
+
+			_, found, err := store.Revoke(ctx, consentID, now, func(*Consent) ([]byte, error) {
+				return []byte(marker), nil
+			})
+			if !found || !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Revoke = found %v, err %v; want found, err %v", found, err, tc.wantErr)
+			}
+
+			var records int
+			if err := store.pool.QueryRow(ctx,
+				"SELECT count(*) FROM ldv_outbox WHERE record = $1::jsonb", marker,
+			).Scan(&records); err != nil {
+				t.Fatalf("count outbox records: %v", err)
+			}
+			fetched, _, err := store.Get(ctx, consentID)
+			if err != nil {
+				t.Fatalf("get consent: %v", err)
+			}
+			wantRecords, wantStatus := 0, tc.status
+			if tc.wantErr == nil {
+				wantRecords, wantStatus = 1, "REVOKED"
+			}
+			if records != wantRecords || fetched.Status != wantStatus {
+				t.Fatalf("outbox records %d, status %q; want %d, %q", records, fetched.Status, wantRecords, wantStatus)
+			}
+		})
+	}
+
+	if _, found, err := store.Revoke(ctx, "test-"+uuid.NewString(), now, noRecord); found || err != nil {
+		t.Fatalf("Revoke of an unknown consent = found %v, err %v; want not found", found, err)
 	}
 }

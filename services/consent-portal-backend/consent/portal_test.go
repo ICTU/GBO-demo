@@ -119,6 +119,7 @@ type memStore struct {
 	polymorphic map[SubjectRef]Polymorphic
 	uses        map[string]Usage
 	usesErr     error
+	revokeErr   error // what Revoke answers instead of revoking
 }
 
 func newMemStore() *memStore {
@@ -201,6 +202,9 @@ func (m *memStore) Get(_ context.Context, consentID string) (Record, error) {
 func (m *memStore) Revoke(_ context.Context, consentID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.revokeErr != nil {
+		return m.revokeErr
+	}
 	r, ok := m.recs[consentID]
 	if !ok {
 		return ErrNotFound
@@ -282,6 +286,94 @@ func TestRevokeUnknownConsentIsNotFound(t *testing.T) {
 	err := p.RevokeConsent(context.Background(), BSN("111111111"), "c-nope")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("revoke unknown = %v, want ErrNotFound", err)
+	}
+}
+
+// Only an active consent can be revoked (#600). Revoking an expired one would
+// show it as revoked, and the register would log a withdrawal that never
+// happened.
+func TestRevokeRefusesAnExpiredConsent(t *testing.T) {
+	p, _, store := testPortal(t, nil)
+	ctx := context.Background()
+
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV", ValiditySeconds: 60})
+	if err != nil {
+		t.Fatalf("give consent: %v", err)
+	}
+	p.Now = func() time.Time { return time.Now().Add(2 * time.Hour) }
+
+	err = p.RevokeConsent(ctx, BSN("111111111"), granted.ConsentID)
+	if !errors.Is(err, ErrNotRevocable) {
+		t.Fatalf("revoke expired = %v, want ErrNotRevocable", err)
+	}
+	if len(store.revoked) != 0 {
+		t.Fatalf("the register was asked to revoke an expired consent: %v", store.revoked)
+	}
+	recs, err := p.ListConsents(ctx, BSN("111111111"))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(recs) != 1 || recs[0].Effective != StatusExpired {
+		t.Fatalf("after the refusal = %+v, want one expired consent", recs)
+	}
+}
+
+func TestRevokeRefusesARevokedConsent(t *testing.T) {
+	p, _, store := testPortal(t, nil)
+	ctx := context.Background()
+
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	if err != nil {
+		t.Fatalf("give consent: %v", err)
+	}
+	if err := p.RevokeConsent(ctx, BSN("111111111"), granted.ConsentID); err != nil {
+		t.Fatalf("first revoke: %v", err)
+	}
+
+	err = p.RevokeConsent(ctx, BSN("111111111"), granted.ConsentID)
+	if !errors.Is(err, ErrNotRevocable) {
+		t.Fatalf("second revoke = %v, want ErrNotRevocable", err)
+	}
+	if len(store.revoked) != 1 {
+		t.Fatalf("revoked = %v, want the first revocation only", store.revoked)
+	}
+}
+
+// Ownership is checked first: another citizen learns nothing about the status
+// of a consent that is not theirs.
+func TestRevokeOfAnotherCitizensInactiveConsentIsNotOwned(t *testing.T) {
+	p, _, _ := testPortal(t, nil)
+	ctx := context.Background()
+
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	if err != nil {
+		t.Fatalf("give consent: %v", err)
+	}
+	if err := p.RevokeConsent(ctx, BSN("111111111"), granted.ConsentID); err != nil {
+		t.Fatalf("revoke by owner: %v", err)
+	}
+
+	err = p.RevokeConsent(ctx, BSN("222222222"), granted.ConsentID)
+	if !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("revoke by other citizen = %v, want ErrNotOwned", err)
+	}
+}
+
+// The status can change between the portal's read and the revocation; the
+// register then refuses, and the portal passes that on.
+func TestRevokeRefusedByTheRegisterIsNotRevocable(t *testing.T) {
+	p, _, store := testPortal(t, nil)
+	ctx := context.Background()
+
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	if err != nil {
+		t.Fatalf("give consent: %v", err)
+	}
+	store.revokeErr = ErrNotRevocable
+
+	err = p.RevokeConsent(ctx, BSN("111111111"), granted.ConsentID)
+	if !errors.Is(err, ErrNotRevocable) {
+		t.Fatalf("revoke = %v, want ErrNotRevocable", err)
 	}
 }
 

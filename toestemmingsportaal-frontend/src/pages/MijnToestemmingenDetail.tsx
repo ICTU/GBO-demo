@@ -9,7 +9,7 @@ import RevokeModal from '../components/consent-detail/RevokeModal'
 import UsageSection from '../components/consent-detail/UsageSection'
 import { useConsents } from '../hooks/useConsents'
 import { usePortalToken } from '../hooks/usePortalToken'
-import { revokeConsent } from '../api/portalClient'
+import { CONSENT_NOT_REVOCABLE, PortalApiError, revokeConsent } from '../api/portalClient'
 import {
   deriveAfnemerName,
   deriveOnderwerp,
@@ -26,6 +26,7 @@ export default function MijnToestemmingenDetail() {
   const [modalOpen, setModalOpen] = useState(false)
   const [revoking, setRevoking] = useState(false)
   const [revokeError, setRevokeError] = useState<string | null>(null)
+  const [notRevocable, setNotRevocable] = useState(false)
 
   useEffect(() => {
     if (!token) {
@@ -40,13 +41,22 @@ export default function MijnToestemmingenDetail() {
   const onRevoke = async () => {
     if (!token || !consent) return
     setRevokeError(null)
+    setNotRevocable(false)
     setRevoking(true)
     try {
       await revokeConsent(token, consent.consent_id)
       await refresh()
       navigate(`/mijnoverheid/toestemmingen/${id}/ingetrokken`)
     } catch (err) {
-      setRevokeError((err as Error).message)
+      if (err instanceof PortalApiError && err.reason === CONSENT_NOT_REVOCABLE) {
+        // The consent was revoked or expired since this page was loaded:
+        // say so, and show its current status.
+        setNotRevocable(true)
+        setModalOpen(false)
+        await refresh()
+      } else {
+        setRevokeError((err as Error).message)
+      }
     } finally {
       setRevoking(false)
     }
@@ -127,6 +137,11 @@ export default function MijnToestemmingenDetail() {
             <HistoryTimeline events={history} />
           </div>
 
+          {notRevocable && (
+            <div className="consent-error">
+              Deze toestemming is al ingetrokken of verlopen en kan niet meer worden ingetrokken.
+            </div>
+          )}
           {revokeError && (
             <div className="consent-error">Intrekken mislukt: {revokeError}</div>
           )}
