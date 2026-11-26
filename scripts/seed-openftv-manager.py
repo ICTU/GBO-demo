@@ -13,7 +13,7 @@ to every PDP listed in services/openftv-manager/bundles/*.yaml.
 
 Ids are uuid5 of the file's repo-relative path, so re-running updates a
 policy in place instead of creating a duplicate — the script is safe to
-run on every `make` invocation.
+run on every start of the AppHost (the manager-seed step).
 
 Usage:
     FTV_MANAGER_DEPLOY_PASSWORD=... scripts/seed-openftv-manager.py \

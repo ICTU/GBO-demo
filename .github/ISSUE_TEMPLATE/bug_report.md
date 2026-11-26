@@ -10,7 +10,7 @@ labels: bug
 
 ## Steps to reproduce
 
-1. `make demo` (or a specific target / curl / UI action)
+1. `aspire run` (or another profile / curl / UI action)
 2. …
 
 ## Expected
@@ -29,4 +29,4 @@ labels: bug
 
 ## Extra context
 
-<!-- Anything else that might help. Logs from `docker compose logs <service>` are useful. -->
+<!-- Anything else that might help. Logs from `aspire logs <resource>` (in `aspire/`) or the Aspire dashboard are useful. -->

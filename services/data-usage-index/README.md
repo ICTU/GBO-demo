@@ -71,8 +71,8 @@ PDP's decision at the source's Inway, before the delivery happened.
 ## Demo shortcuts
 
 - Both listeners trust the `Fsc-Authorization` header the Inway forwards,
-  without checking its signature, and are also reachable on the compose
-  networks. A real deployment lets only the Inway reach them, as for the
+  without checking its signature, and are also reachable on the AppHost's
+  container network. A real deployment lets only the Inway reach them, as for the
   register's status listener.
 
 ## Run and test
@@ -81,6 +81,6 @@ PDP's decision at the source's Inway, before the delivery happened.
 go test ./...
 ```
 
-`make demo-dvtp` builds and starts it, and `make fsc-seed-data-usage-index`
-publishes both services over FSC, connects `bd-outway` and `brp-outway` for
+The AppHost (`aspire run`, the default dvtp profile) builds and starts it, and
+its `fsc-seed-data-usage-index` step publishes both services over FSC, connects `bd-outway` and `brp-outway` for
 registering and `cr-outway` for the lookup.

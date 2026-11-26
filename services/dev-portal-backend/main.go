@@ -60,10 +60,18 @@ type config struct {
 	OrganizationsFile  string
 	LokiURL            string
 	LokiDecisionQuery  string
-	PoliciesDir        string
-	RulesFile          string
-	FscGroupID         string
-	FscTxlogPeers      []fscTxlogPeer
+	// TelemetryAPIURL is the Aspire dashboard (telemetry.go). Set, traces
+	// and the console decision log come from its telemetry API, with
+	// TelemetryAPIKey; empty, from JaegerQueryURL and LokiURL.
+	TelemetryAPIURL string
+	TelemetryAPIKey string
+	JaegerQueryURL  string
+	// PdpResourceName is the PDP's resource in the dashboard.
+	PdpResourceName string
+	PoliciesDir     string
+	RulesFile       string
+	FscGroupID      string
+	FscTxlogPeers   []fscTxlogPeer
 	// LdvLogbooks are the Logboek Dataverwerkingen the chain view queries —
 	// one per Verantwoordelijke, because that is where LDV puts them.
 	LdvLogbooks  []ldvLogbook
@@ -152,6 +160,10 @@ func loadConfig() config {
 		OrganizationsFile:  getEnv("ORGANIZATIONS_FILE", "/organizations.json"),
 		LokiURL:            getEnv("LOKI_URL", "http://loki:3100"),
 		LokiDecisionQuery:  getEnv("LOKI_DECISION_QUERY", `{compose_service="openftv-pdp"} |= "Decision Log"`),
+		TelemetryAPIURL:    os.Getenv("TELEMETRY_API_URL"),
+		TelemetryAPIKey:    os.Getenv("TELEMETRY_API_KEY"),
+		JaegerQueryURL:     getEnv("JAEGER_QUERY_URL", "http://jaeger:16686"),
+		PdpResourceName:    getEnv("PDP_RESOURCE_NAME", "openftv-pdp"),
 		PoliciesDir:        getEnv("POLICIES_DIR", "/policies"),
 		RulesFile:          getEnv("RULES_FILE", "/rules.json"),
 		FscGroupID:         getEnv("FSC_GROUP_ID", "fsc-demo"),
@@ -709,7 +721,11 @@ func handleDecisions(cfg config, adl adlStore) http.HandlerFunc {
 			return
 		}
 
-		entries, err := lokiDecisionsForTrace(r.Context(), cfg, txID, since)
+		decisionsFor := lokiDecisionsForTrace
+		if cfg.TelemetryAPIURL != "" {
+			decisionsFor = dashboardDecisionsForTrace
+		}
+		entries, err := decisionsFor(r.Context(), cfg, txID, since)
 		if err != nil {
 			out.Engine.Error = err.Error()
 		} else {
@@ -749,34 +765,13 @@ func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string, sinc
 	if err := json.NewDecoder(resp.Body).Decode(&lr); err != nil {
 		return nil, fmt.Errorf("loki decode: %w", err)
 	}
-	type stamped struct {
-		ts  string
-		raw map[string]any
-	}
-	var rows []stamped
+	var lines []stampedLine
 	for _, stream := range lr.Data.Result {
 		for _, v := range stream.Values {
-			var entry map[string]any
-			if json.Unmarshal([]byte(repairDockerSplits(v[1])), &entry) != nil {
-				continue
-			}
-			if traceIDOf(entry) == traceID {
-				rows = append(rows, stamped{ts: v[0], raw: entry})
-			}
+			lines = append(lines, stampedLine{ts: v[0], line: repairDockerSplits(v[1])})
 		}
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].ts < rows[j].ts })
-	seen := make(map[string]bool)
-	out := make([]map[string]any, 0, len(rows))
-	for _, r := range rows {
-		id, _ := r.raw["decision_id"].(string)
-		if id != "" && seen[id] {
-			continue
-		}
-		seen[id] = true
-		out = append(out, r.raw)
-	}
-	return out, nil
+	return decisionsForTransaction(lines, traceID), nil
 }
 
 // handleRules serves the pre-generated rules.json (per rule its rule_id,
@@ -1056,6 +1051,7 @@ func newMux(cfg config, hub *traceHub, adl adlStore) *http.ServeMux {
 	mux.HandleFunc("/citizens", passthroughFile(cfg.CitizensFile))
 	mux.HandleFunc("/organizations", passthroughFile(cfg.OrganizationsFile))
 	mux.HandleFunc("/decisions", handleDecisions(cfg, adl))
+	mux.HandleFunc("/traces/", handleTrace(cfg))
 	mux.HandleFunc("/rules", handleRules(cfg))
 	mux.HandleFunc("/policy-source", handlePolicySource(cfg))
 	mux.HandleFunc("/policy-snippet", handlePolicySnippet(cfg))
@@ -1157,7 +1153,7 @@ func fatal(msg string, err error) {
 }
 
 // serve runs the server until the process is asked to stop, then drains it.
-// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
+// Without this a SIGTERM (stopping the AppHost, a Kubernetes rollout) killed
 // in-flight requests outright. Previously a failed ListenAndServe was only
 // logged, so a service that could not bind its port exited 0.
 func serve(srv *http.Server, endStreams context.CancelFunc) {

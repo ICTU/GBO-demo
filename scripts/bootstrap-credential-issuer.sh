@@ -21,4 +21,7 @@ ALTER ROLE credential_issuer LOGIN PASSWORD :'issuer_password';
 
 SELECT 'CREATE DATABASE credential_issuer OWNER credential_issuer'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'credential_issuer') \gexec
+-- The database may exist already without this owner: the Aspire AppHost
+-- creates it before this script runs.
+ALTER DATABASE credential_issuer OWNER TO credential_issuer;
 SQL

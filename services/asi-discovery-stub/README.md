@@ -21,7 +21,7 @@ A stub of the Discover Interface Provider (DIP) of ETSI TS 119 478 clause 5. The
 
 ## Run
 
-`make demo-asi` starts it on `GBO_PORT_ASI_DISCOVERY` (default 9426), with the ASIP's `brp` data service as its source.
+`Gbo__Profiles=full,asi aspire run` starts it on port 9426, with the ASIP's `brp` data service as its source.
 
 On its own:
 

@@ -592,7 +592,7 @@ The status check is logged like any other processing rather than treated as a
 read-only lookup: it is what makes a revocation take effect.
 
 ```bash
-docker compose exec -T logboek-bd \
+docker exec "$(docker ps -q --filter label=com.docker.compose.service=logboek-bd)" \
   wget -qO- http://localhost:4016/verwerkingsactiviteiten
 ```
 

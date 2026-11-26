@@ -102,6 +102,13 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", serviceName))
 	cfg := loadConfig()
 
+	shutdownTracer, err := initTracer(context.Background(), serviceName)
+	if err != nil {
+		slog.Error("initialising tracing", "err", err)
+		os.Exit(1)
+	}
+	defer func() { _ = shutdownTracer(context.Background()) }()
+
 	// No token, no logbook. The write endpoint is the only way records get in;
 	// starting without one would quietly turn a Verantwoordelijke's logboek
 	// into a write-anything endpoint on the internal network.
@@ -152,7 +159,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           httpapi.NewHandler(logbook, cfg.WriteToken, cfg.ReadToken, logbookID),
+		Handler:           traced(httpapi.NewHandler(logbook, cfg.WriteToken, cfg.ReadToken, logbookID)),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

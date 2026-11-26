@@ -38,7 +38,7 @@ curl -s https://gbo-trust-minezk.simulatie.datastelsel.nl/lote-ca-cert.pem | ope
 ```
 
 A local deployment has its own root, created by
-`make provision-trust-list-signer`. When the simulation root is replaced,
+`aspire/scripts/provision.sh trust-list-signer`. When the simulation root is replaced,
 update this table.
 
 ## Provision and publish on the host
@@ -73,8 +73,8 @@ require a key even before one is configured. Verified mode is labelled
 `jwt-verified` and may use a configured HTTPS URL.
 
 ```sh
-make provision-trust-list-signer
-make publish-trust-lists
+aspire/scripts/provision.sh trust-list-signer
+aspire/scripts/provision.sh publish-trust-lists
 ```
 
 The first command creates the dedicated scheme root once and keeps it on
@@ -108,7 +108,7 @@ Validity defaults to 30 days. Within the last day it is renewed automatically
 renewal with new times and a higher sequence using:
 
 ```sh
-make publish-trust-lists GBO_LOTE_PUBLISH_FLAGS=--renew
+aspire/scripts/provision.sh publish-trust-lists GBO_LOTE_PUBLISH_FLAGS=--renew
 ```
 
 ## Daily refresh in the simulation environment
@@ -116,8 +116,8 @@ make publish-trust-lists GBO_LOTE_PUBLISH_FLAGS=--renew
 `systemd/gbo-trust-lists.service.example` and
 `systemd/gbo-trust-lists.timer.example` provide a daily **host-side** refresh.
 Before installing them, set the service user and checkout path for that
-simulation deployment. The checkout's `.env` supplies URLs and file paths
-through Make. Keep the keys outside every container mount. Install the files
+simulation deployment. The unit's environment supplies URLs and file paths
+to `aspire/scripts/provision.sh`. Keep the keys outside every container mount. Install the files
 without `.example` and enable the timer after the trust-list interface review.
 A failed run remains a failed host service run; the old generation stays
 active. Neither the timer nor any simulation deployment is enabled by this

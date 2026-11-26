@@ -10,12 +10,17 @@ export const FRAME_HEADERS = {
 }
 
 export default defineConfig({
+  // Outside node_modules: the AppHost's installers run `npm ci`, which would
+  // wipe Vite's dependency pre-bundling on every start.
+  cacheDir: '.vite',
   plugins: [react()],
   preview: {
     headers: FRAME_HEADERS,
   },
   server: {
     port: 9002,
+    // Fail instead of moving to the next free port: the other apps link here.
+    strictPort: true,
     host: true,
     headers: FRAME_HEADERS,
     watch: {

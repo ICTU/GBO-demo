@@ -109,3 +109,15 @@ export const docs = {
 } as const
 
 export const versionString = resolve(rc?.versionString, import.meta.env.VITE_VERSION_STRING, '')
+
+/* Of de DvTP-stroom (HypotheekBV, toestemmingsportaal, Installatie Register)
+   in deze omgeving draait. De AppHost zet dvtpAvailable op "false" als het
+   gestarte profiel die stroom niet bevat; dan wijst de startknop niet naar
+   een poort waar niets luistert. Zonder waarde: beschikbaar. */
+export const dvtpAvailable = resolve(rc?.dvtpAvailable, import.meta.env.VITE_DVTP_AVAILABLE, 'true') !== 'false'
+
+/* De FSC-controller van de EUDI-afnemer (de EDI-issuer) draait lokaal alleen
+   met een EUDI-profiel. De AppHost zet eudiFscAvailable dan op "false", zodat
+   de pagina geen link naar een dode poort toont. */
+export const eudiFscAvailable =
+  resolve(rc?.eudiFscAvailable, import.meta.env.VITE_EUDI_FSC_AVAILABLE, 'true') !== 'false'

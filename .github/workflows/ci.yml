@@ -65,7 +65,7 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
-          args: --config ../../.golangci.yml --timeout 3m
+          args: --config ${{ github.workspace }}/.golangci.yml --timeout 3m
           working-directory: services/${{ matrix.service }}
       - name: go test
         working-directory: services/${{ matrix.service }}
@@ -86,7 +86,7 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
-          args: --config ../../.golangci.yml --timeout 3m
+          args: --config ${{ github.workspace }}/.golangci.yml --timeout 3m
           working-directory: conformance/check
       - name: go test
         working-directory: conformance/check
@@ -422,8 +422,8 @@ jobs:
         if: matrix.service == 'openftv-pdp'
         run: |
           pdp="$(grep -oP '^ARG OPENFTV_REF=\K\S+' services/openftv-pdp/Dockerfile)"
-          mgr="$(grep -oP 'open-ftv/manager:\K\S+' docker-compose.yml)"
-          ui="$(grep -oP 'open-ftv/management-interface:\K\S+' docker-compose.yml)"
+          mgr="$(grep -oP 'open-ftv/manager", "\K[^"]+' aspire/apphost.go)"
+          ui="$(grep -oP 'open-ftv/management-interface", "\K[^"]+' aspire/apphost.go)"
           for v in "$pdp" "$mgr" "$ui"; do
             test -n "$v" || { echo "OpenFTV version not found in all three places" >&2; exit 1; }
           done

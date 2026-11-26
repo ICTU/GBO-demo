@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"errors"
@@ -323,10 +324,7 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 		serviceName = "graphql-server"
 	}
 
-	exp, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(endpoint),
-		otlptracegrpc.WithInsecure(),
-	)
+	exp, err := otlptracegrpc.New(ctx, otlpTraceOptions(endpoint)...)
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +511,7 @@ func main() {
 }
 
 // serve runs the server until the process is asked to stop, then drains it.
-// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
+// Without this a SIGTERM (stopping the AppHost, a Kubernetes rollout) killed
 // in-flight requests outright.
 func serve(srv *http.Server) {
 	go func() {
@@ -535,4 +533,17 @@ func serve(srv *http.Server) {
 		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
 		_ = srv.Close()
 	}
+}
+
+// otlpTraceOptions picks how the OTLP exporter reaches the collector. A bare
+// host:port, as older deployments set it, keeps the
+// plaintext gRPC connection this service always made. A URL, as Aspire sets
+// it, is left to the SDK: it reads the scheme (http means plaintext), the
+// headers and the certificate settings from the OTEL_EXPORTER_OTLP_*
+// variables itself, which WithEndpoint and WithInsecure would override.
+func otlpTraceOptions(endpoint string) []otlptracegrpc.Option {
+	if endpoint == "" || strings.Contains(endpoint, "://") {
+		return nil
+	}
+	return []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(endpoint), otlptracegrpc.WithInsecure()}
 }

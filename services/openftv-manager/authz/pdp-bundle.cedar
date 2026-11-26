@@ -8,7 +8,7 @@
 // single path it needs and to reading: the bundle named in
 // services/openftv-manager/bundles/, nothing else, GET only.
 //
-// Keep the resource in step with GBO_BUNDLE_MANAGER in the Makefile: both
+// Keep the resource in step with PDP_BUNDLE_MANAGER in aspire/apphost.go: both
 // name the gbo-pdp bundle.
 permit (
     principal,

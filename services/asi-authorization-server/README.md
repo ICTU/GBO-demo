@@ -38,12 +38,12 @@ The ASIP and the authorization server may be operated by one party, but they are
 ## Run
 
 ```bash
-make provision-asip-qtsp-certificate
+# runs as the AppHost's provision-asip-qtsp-certificate step; by hand: see apphost.go
 cd services/asi-authorization-server
 AZSP_TRUST_ANCHORS_FILE=../../.local/secrets/development-ca/reader-ca-cert.pem go run .
 ```
 
-`make provision-asip-qtsp-certificate` issues a test QTSP certificate from the development reader CA, with the `organizationIdentifier` of the test QTSP in `testdata/register.json` (`NTRNL-90000001`). A test QTSP signs its software statement and its client assertions with its key.
+the AppHost's `provision-asip-qtsp-certificate` step issues a test QTSP certificate from the development reader CA, with the `organizationIdentifier` of the test QTSP in `testdata/register.json` (`NTRNL-90000001`). A test QTSP signs its software statement and its client assertions with its key.
 
 Configuration: `AZSP_ADDR` (default `:4021`), `AZSP_ISSUER` (the public base URL, default `http://localhost:4021`), `AZSP_RESOURCES` (per data service of the ASIP its base URL and the name of its authentic source, as `url=name` separated by commas, default `http://localhost:4020/brp/authsrc-api=Basisregistratie Personen (mock)`; the request page shows the name, so it is required), `AZSP_SIGNING_KEY_FILE` (PEM, ECDSA P-256; without it the server generates a key at start, so tokens do not survive a restart), `AZSP_CLIENTS_FILE`, `AZSP_REGISTER_FILE` (default `testdata/register.json`), `AZSP_TRUST_ANCHORS_FILE` (PEM; the roots QTSP certificates must chain to, the development reader CA; without it every registration is refused), `AZSP_ENTITLEMENT_RECHECK_INTERVAL` (default `1h`), `AZSP_REQUIRE_AUTHORIZATION_DETAILS` (default `false`; set to `true` to refuse authorization requests without the per-attribute RFC 9396 detail; it does not apply to issuance), `AZSP_ISSUANCE_RESOURCES` (the issuance resources of credential issuers, as `url=organizationIdentifier=name` separated by commas: the issuer identifier, the `organizationIdentifier` of the only client that may obtain tokens for it, and the name of its source; empty by default).
 
@@ -130,7 +130,7 @@ With the NL Wallet the authorization server has the citizen disclose the PID thr
 - when the wallet disclosed the PID, the core logs the user in: the token carries the BSN, the four PID attributes and `acr`/`amr` `nl-wallet`. The NL PID has no place of birth, so one of the five mandatory PID attributes is missing;
 - declined in the wallet or expired, a return without the correct nonce, or a disclosure without a BSN or of another type: the request page again, with why, and the transaction stays. A verifier that cannot be reached, fails or refuses the API key, also when it fetches the disclosed attributes of a finished session: a 503 page, and the transaction stays for DigiD (mock). A run with the real wallet on one phone, in the simulation environment where the route runs over HTTPS, is still to be done.
 
-Configuration: `AZSP_WALLET_VERIFIER_URL` (internal API), `AZSP_WALLET_VERIFIER_STATUS_URL` (wallet API, for the session status) and `AZSP_WALLET_VERIFIER_API_KEY_FILE`, read at startup; without the key file the wallet is not offered. Compose mounts only the directory with the key, not the verifier's configuration. `make demo-asi` reprovisions when the return mode required by `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` differs from the current configuration. Run `make provision-asi-wallet-verifier` again after changing that URL's host: the reader certificate also binds the origin.
+Configuration: `AZSP_WALLET_VERIFIER_URL` (internal API), `AZSP_WALLET_VERIFIER_STATUS_URL` (wallet API, for the session status) and `AZSP_WALLET_VERIFIER_API_KEY_FILE`, read at startup; without the key file the wallet is not offered. Compose mounts only the directory with the key, not the verifier's configuration. `Gbo__Profiles=full,asi aspire run` reprovisions when the return mode required by `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` differs from the current configuration. Run `aspire/scripts/provision.sh asi-wallet-verifier` again after changing that URL's host: the reader certificate also binds the origin.
 
 ## The EUDI wallets
 

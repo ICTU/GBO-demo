@@ -94,7 +94,7 @@ over dezelfde beslissing zijn observability en gelden niet als audit-bron.
 | | ADL | Console-decision-log van de embedded OPA |
 |---|---|---|
 | Schrijver | OpenFTV, per evaluatie | de embedded OPA, per evaluatie |
-| Opslag | Postgres, database `ftv_adl` | stdout, via promtail naar Loki |
+| Opslag | Postgres, database `ftv_adl` | stdout, als OTLP-logs naar het Aspire-dashboard (lokaal) of via de containerlogs naar Loki (simulatieomgeving) |
 | Inhoud | het AuthZEN-request en -antwoord: de uitkomst en bij een weigering de reden-code | de volledige policy-uitkomst, met per veld de regel en de stappen |
 | Rol | audit-bron | observability: best-effort, korte bewaartermijn |
 

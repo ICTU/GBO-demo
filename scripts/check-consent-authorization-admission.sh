@@ -5,21 +5,25 @@
 # providers, but the register seeds its participants into a new volume only;
 # an existing volume keeps the participants of its first start. Without this
 # check the seed waits 30 s for a signature that never comes.
+#
+# The AppHost runs it as the consent-authorization-admission step, in the
+# pki-tools image on its container network. REGISTER_URL is the register's
+# internal listener; ADMIN_URL is where a person opens its admin forms.
 
 set -euo pipefail
 
 register_peer="99999999900000000700"
 providers=("99999999900000000300" "99999999900000001000")
-admin_port="${GBO_PORT_DVTP_ONBOARDING_REGISTER:-9415}"
+register_url="${REGISTER_URL:-http://dvtp-onboarding-register:4015}"
+admin_url="${ADMIN_URL:-the dvtp-onboarding-register endpoint in the Aspire dashboard}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "ERROR: jq is not installed; it is needed to read the DvTP onboarding register (see README.md)" >&2
   exit 1
 fi
 
-if ! feed=$(docker compose exec -T dvtp-onboarding-register \
-  wget -qO- http://localhost:4015/internal/openftv/participants 2>/dev/null); then
-  echo "ERROR: cannot read the DvTP onboarding register; is it running? (make pdp-up starts it)" >&2
+if ! feed=$(curl -fsS --max-time 5 "$register_url/internal/openftv/participants" 2>/dev/null); then
+  echo "ERROR: cannot read the DvTP onboarding register at $register_url; is it running?" >&2
   exit 1
 fi
 
@@ -46,10 +50,10 @@ if [ "${#missing[@]}" -gt 0 ]; then
     echo "connection to consent-authorization. The register volume predates that"
     echo "admission: the demo seeds reach a new volume only. Either"
     echo "  - add $register_peer to the sources of each of these participants at"
-    echo "    http://localhost:$admin_port and wait 5 s for the OpenFTV PIP pull, or"
-    echo "  - reset the register with the rest of the demo data: make demo-down,"
-    echo "    then docker compose down -v,"
-    echo "then run make demo again. See TROUBLESHOOTING.md."
+    echo "    $admin_url and wait 5 s for the OpenFTV PIP pull, or"
+    echo "  - reset the register: stop the AppHost, remove the"
+    echo "    gbo-dvtp-onboarding-data volume and start it again,"
+    echo "then restart this step. See TROUBLESHOOTING.md."
   } >&2
   exit 1
 fi

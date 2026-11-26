@@ -1,84 +1,98 @@
 # Troubleshooting
 
-Common problems on first boot of the demo stack. See also `README.md`.
+The Aspire dashboard (<http://localhost:15126>) is the first stop: it shows
+every resource's state and health, the exit code of every run-once step
+(certificates, migrations, seeds) and each resource's console log. From a
+terminal in `aspire/`, `aspire describe` lists the same states and
+`aspire logs <resource>` prints one resource's console.
+
+## A resource waits forever or a run-once step failed
+
+The AppHost starts resources in dependency order: a resource waits until the
+ones it depends on are healthy, or for run-once steps, have exited 0. A step
+that fails holds up everything after it. Find the first resource that is not
+`Running`/`Healthy` or exited non-zero in the dashboard and read its console
+log. Run-once steps leave the list once they succeed; a running or failed one
+stays, and "Show hidden resources" in the dashboard (or
+`aspire describe --include-hidden`) shows the finished ones. Restart a
+run-once step from its row in the dashboard once the cause is fixed; the FSC
+certificate steps and the seeds are idempotent.
 
 ## Port conflicts
 
-The demo uses ports `9000-9686`. If something fails with "port already allocated":
+The AppHost publishes fixed ports where a URL or certificate depends on them:
+
+- the frontends: 9000–9004;
+- the FSC Controllers and certportal: 8091–8102, and the EDI Outway on 8087
+  (the EDI peer only with an EUDI profile);
+- the EUDI and ASI services: 9409, 9424–9432 and 18001;
+- the dashboard: 15126, 19025 and 20111.
+
+Every other port is assigned per run and listed in the dashboard. If a
+resource fails with "address already in use", find the other listener:
 
 ```bash
-lsof -i -P -n | grep LISTEN | grep -E ":9[0-9]{3}"
+lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(9[0-9]{3}|8[01][0-9]{2}|15126|18001)\b'
 ```
-
-Fix by running `make demo-down` (or `docker compose down` for the relevant compose file), or stop the conflicting service.
 
 ## "Blocked request" or 403 from another machine
 
-Vite's dev server refuses host names it does not know. Set `GBO_PUBLIC_HOST`
-in `.env` (more names in `GBO_EXTRA_ALLOWED_HOSTS`, comma-separated) and run
-`make demo`. The same setting fixes links that point at `localhost`.
+Vite's dev server refuses host names it does not know. Start the AppHost with
+the host name the browser uses, plus any other names, comma-separated:
+
+```bash
+aspire run -- --Gbo:PublicHost=demo.example.org --Gbo:ExtraAllowedHosts=alias.example.org
+```
+
+The same setting fixes links that point at `localhost`.
+
+## `npm ci` fails in a frontend installer
+
+The `*-installer` resources run `npm ci`, which needs npm 11 (Node.js 24 or
+newer, as in CI). npm 10 reads the lockfiles as out of sync (`Missing:
+@types/react@… from lock file`). The installers run the first `npm` on the
+PATH that `aspire run` was started with, so the AppHost checks that one and
+stops with a message when it is too old, naming a newer Node.js it found
+(Homebrew, nvm, Volta, fnm). Put that directory first on PATH, or install one
+(`brew install node`).
 
 ## Docker resource limits
 
-`make demo-eudi` and `make demo-full` start many containers, most of them
-FSC infrastructure. Minimum:
+The `dvtp` profile runs about 60 long-running containers, most of them FSC
+infrastructure, plus run-once steps; `full` runs more. The containers need
+about 1 GB of RAM for `dvtp`; give Docker at least 8 GB for `full`, and at
+least 4 cores.
 
-- **RAM**: 8 GB allocated to Docker (Preferences → Resources → Memory)
-- **CPU**: no strict requirement, but slow below 4 cores
-- **Disk**: ~10 GB for images
-
-Symptoms of insufficient RAM: containers crash at random, `docker compose logs` shows OOM kills.
-
-## `healthcheck.start_interval` requires Docker Engine v25
-
-`make demo` stops with:
-
-```text
-can't set healthcheck.start_interval as feature require Docker Engine v25 or later
-```
-
-Docker Compose v2.24 to v5.0.2 refuse `start_interval` when the engine reports
-a Docker API below 1.44, that is Docker Engine before 25.
-Check with `docker version --format '{{.Server.APIVersion}}'` and upgrade the
-engine.
+Symptoms of insufficient RAM: containers crash at random, and the dashboard
+shows them exiting with code 137 (OOM kills).
 
 ## Missing certificates
 
-The `demo-*` targets generate the local FSC certificates in the correct order.
-Certificate mount failures normally mean the stack was started directly with
-`docker compose` before bootstrap completed. Prefer `make demo-eudi`, or run
-the certificate target manually:
-
-```bash
-make fsc-certs
-```
+The AppHost creates the local FSC certificates before it starts the FSC
+peers: `fsc-root-ca`, then one `<peer>-certs` step per peer, which runs
+`fsc-infra/pki/bootstrap-peer.sh` for that party's row in `fsc-infra/peers.txt`
+through `aspire/scripts/fsc-pki.sh`. Certificate mount failures mean one of those
+steps failed; its console log in the dashboard names the cause. The steps
+skip an organisation whose certificates exist, so after a fix restart the
+failed step.
 
 ## A migration fails
 
-Each FSC migration runs once, after `postgres-init` has created the
-databases, and its peer services start only when it has completed. When one
-fails, `up` stops with `service "edi-migrations-manager" didn't complete
-successfully`. Read its log, fix the cause and run the `make` target again:
-
-```bash
-docker compose -f fsc-infra/docker-compose.yml logs postgres-init edi-migrations-manager
-```
+Each FSC migration step waits for its database (`<peer>-db-<part>`, nested
+under `fsc-postgres`), which Aspire's PostgreSQL integration creates once the
+server is healthy. A migration that still fails shows its error in its console
+log; restart it from the dashboard.
 
 ## Contract seed fails
 
-Check the `make fsc-seed-bri` output. Common causes:
+Check the console log of the failing `fsc-seed-*` step. Each seed retries a
+few times, since the FSC Managers have no health check. Common causes:
 
 - **HTTP 500 `password authentication failed for user "postgres"`**: the FSC
-  database volume was initialized with a different password than the one in
-  `fsc-infra/.env`. This happens with a second clone or worktree on the same
-  machine: the FSC stack's Compose project is `fsc-infra` in every checkout
-  unless `FSC_PROJECT_NAME` is set in `fsc-infra/.env`, so the new checkout
-  reuses the old checkout's volume while `make` generates a new password.
-  Either give the new checkout its own FSC project by setting
-  `FSC_PROJECT_NAME` in its `fsc-infra/.env` before the first `make demo`, or,
-  when the old FSC state is disposable, run `make fsc-clean` and start again.
-  `make fsc-clean` removes the shared `fsc-infra` volumes, including those of
-  the other checkout.
+  database volume (`gbo-fsc-postgres-data`) was initialized with a different
+  password than `fsc-postgres-password` in the AppHost secrets. This happens
+  when the secrets are reset but the volume is kept. When the FSC state is
+  disposable, run `aspire/scripts/fsc-clean.sh` and start again.
 - **HTTP 500 `unknown protocol`**: manager v2.4.0 versus script mismatch. Verify that `services/dev-portal-backend/fsctxlog.go` and this script use the same FSC version.
 - **HTTP 401**: inspect the responding Manager's logs and the client
   certificate used by the seed. Auto-sign configuration is separate:
@@ -86,10 +100,13 @@ Check the `make fsc-seed-bri` output. Common causes:
   Managers use `--authzen-auto-sign-pdp-address` for connection contracts.
   These two options cannot be combined on one Manager.
 - **Publication contract stays pending**: `directory-manager` signs these by
-  grant type. Wait 5-10s and check the publication state at `bd-manager`:
+  grant type. Wait 5-10s and check the publication state at `bd-manager`,
+  from a container on the AppHost's network:
   ```bash
-  docker run --rm --network fsc-infra_default \
-    -v $(pwd)/fsc-infra:/work:ro gbo-demo/pki-tools:local \
+  net=$(docker inspect -f '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}}{{end}}' \
+    "$(docker ps -q --filter label=com.docker.compose.service=bd-manager | head -1)")
+  docker run --rm --network "$net" \
+    -v "$(pwd)/fsc-infra:/work:ro" gbo-demo/pki-tools:local \
     bash -c 'curl -s --cert /work/orgs/belastingdienst-mock/pki/internal/internal-cert.pem \
                     --key /work/orgs/belastingdienst-mock/pki/internal/internal-cert-key.pem \
                     --cacert /work/orgs/belastingdienst-mock/pki/internal/intermediate_ca.pem \
@@ -97,11 +114,12 @@ Check the `make fsc-seed-bri` output. Common causes:
   ```
 
 - **Connection contract stays pending**: the source Manager asks the
-  auto-sign PDP to decide whether to counter-sign. Inspect the decision:
+  auto-sign PDP to decide whether to counter-sign. Inspect the decision in
+  the `openftv-pdp` console log (dashboard, or `aspire logs openftv-pdp` in
+  `aspire/`):
 
   ```bash
-  docker compose logs --no-log-prefix openftv-pdp \
-    | grep auto_sign_contract | tail -1 | jq .result.response
+  aspire logs openftv-pdp | grep auto_sign_contract | tail -1 | sed 's/^[^{]*//' | jq .result.response
   ```
 
   `ADMISSION_REGISTER_UNAVAILABLE` means the PDP could not read the
@@ -118,14 +136,15 @@ onboarding register admits to that peer. The demo configuration admits
 Hypotheek-BV (`99999999900000000300`) and the Installatie Register
 (`99999999900000001000`), but the register writes its seed participants into
 a new volume only. A volume from before that admission keeps the old sources,
-and the seed target stops with an error that names the missing participants.
-Fix it in one of two ways, then run `make demo` again:
+and the `consent-authorization-admission` step stops with an error that names
+the missing participants. Fix it in one of two ways, then restart that step
+and the two `fsc-seed-consent-authorization-*` steps from the dashboard:
 
-- In the register's admin UI (`http://localhost:9415`), add
-  `99999999900000000700` to the sources of each named participant. The PDP
-  pulls the register every 5 seconds.
-- Reset the register with all other demo data of the main stack:
-  `make demo-down`, then `docker compose down -v`.
+- In the register's admin UI (the `dvtp-onboarding-register` endpoint in the
+  dashboard), add `99999999900000000700` to the sources of each named
+  participant. The PDP pulls the register every 5 seconds.
+- Reset the register: stop the AppHost, remove the
+  `gbo-dvtp-onboarding-data` volume and start it again.
 
 ## Every request denies with `NO_APPLICABLE_RULE`
 
@@ -147,7 +166,7 @@ passes the request through. It reads no grant property, and the seeds set
 none. Decode the token to see what the provider Manager actually issued:
 
 ```bash
-docker compose logs --no-log-prefix openftv-pdp | grep -o 'Bearer [A-Za-z0-9._-]*' | tail -1 \
+aspire logs openftv-pdp | grep -o 'Bearer [A-Za-z0-9._-]*' | tail -1 \
   | cut -d' ' -f2 | cut -d. -f2 \
   | python3 -c 'import base64,json,sys; d=sys.stdin.read().strip(); print(json.dumps(json.loads(base64.urlsafe_b64decode(d+"="*(-len(d)%4))), indent=2))'
 ```
@@ -159,71 +178,69 @@ harm, since nothing reads it. Re-run the seed to clear it: it detects the
 property mismatch, creates a new contract (contracts are immutable) and
 repoints the grant-link.
 
-Each seed target repairs only its own grants, so repair the whole demo at
-once — the order matters, `fsc-seed-bri-hv` needs the `bri` publication the
-first target creates:
-
-```bash
-make fsc-seed-bri fsc-seed-rvig-source fsc-seed-metadata fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-consent-authorization
-```
+Each seed step repairs only its own grants. Restart them from the dashboard
+in this order, since `fsc-seed-bri-hv` needs the `bri` publication the first
+creates: `fsc-seed-bri`, `fsc-seed-rvig-source`, `fsc-seed-metadata-bd`,
+`fsc-seed-metadata-rvig`, `fsc-seed-bri-hv`, `fsc-seed-consent-status`,
+`fsc-seed-consent-authorization-hv`, `fsc-seed-consent-authorization-ir`.
 
 The `svc` claim in the decoded token names the failing service. To repair just
 that one:
 
-| `svc` | Consumer → provider | Seed target |
+| `svc` | Consumer → provider | Seed step |
 | --- | --- | --- |
-| `bri` | EDI-issuer → Belastingdienst | `make fsc-seed-bri` |
-| `bri` | Hypotheekverlener → Belastingdienst | `make fsc-seed-bri-hv` |
-| `brp` | EDI-issuer → Belastingdienst (RvIG source) | `make fsc-seed-rvig-source` |
-| `gbo-metadata-bd`, `gbo-metadata-rvig` | EDI-issuer → Belastingdienst | `make fsc-seed-metadata` |
-| `consent-status` | PDP → Toestemmingsregister | `make fsc-seed-consent-status` |
-| `consent-authorization` | Hypotheekverlener, Installatie Register → Toestemmingsregister | `make fsc-seed-consent-authorization` |
+| `bri` | EDI-issuer → Belastingdienst | `fsc-seed-bri` |
+| `bri` | Hypotheekverlener → Belastingdienst | `fsc-seed-bri-hv` |
+| `brp` | EDI-issuer → Belastingdienst (RvIG source) | `fsc-seed-rvig-source` |
+| `gbo-metadata-bd`, `gbo-metadata-rvig` | EDI-issuer → Belastingdienst | `fsc-seed-metadata-bd`, `fsc-seed-metadata-rvig` |
+| `consent-status` | PDP → Toestemmingsregister | `fsc-seed-consent-status` |
+| `consent-authorization` | Hypotheekverlener, Installatie Register → Toestemmingsregister | `fsc-seed-consent-authorization-hv`, `fsc-seed-consent-authorization-ir` |
 
 The `sub` claim tells the two `bri` rows apart: `99999999900000000100` is the
-EDI-issuer, `99999999900000000300` the Hypotheekverlener.
+EDI-issuer, `99999999900000000300` the Hypotheekverlener. The EDI-issuer's
+peer and its contracts exist only with an EUDI profile (`eudi`, `full`,
+`onboarding`, `asi`, `credential-issuer`); in the default dvtp run
+`fsc-seed-bri` registers and publishes `bri` without the EDI connection.
 
 If the new contract stays pending, the counterparty refused it; see *Contract
 seed fails* above. Grant properties need OpenFSC >= v2.0.0 on every peer on
 the contract.
 
-## EUDI flow doesn't work after `make demo-eudi`
+## EUDI flow doesn't work under the `eudi` or `full` profile
 
-Start with the generated and activated state:
+If the dashboard shows `eudi-not-configured` (exit code 1), the EUDI parts
+were left out: its log names the missing development CAs or wallet
+registration. Add them and start the AppHost again.
+
+Start with the activated state and the offers:
 
 ```bash
-find .local/onboarding/active -type f -name '*.json' -print
-jq -r '.[].key' services/eudi-issuance-server/config/eudi-offers.json
-docker compose ps
+curl -s http://localhost:9409/eudi-offers.json | jq -r '.[].key'
 ```
 
-`make demo-eudi` should create three active source records and four offers:
-`inkomensverklaring_2024`, `inkomensverklaring_2025`,
-`akte_van_overlijden`, and `demo_inkomen_2025`. The last offer is the
-explicitly unsecured HTTP demonstration.
+and check in the dashboard that `source-reconciler` and
+`eudi-issuance-materialize` exited 0. A working onboarding has three active
+source records and four offers: `inkomensverklaring_2024`,
+`inkomensverklaring_2025`, `akte_van_overlijden`, and `demo_inkomen_2025`.
+The last offer is the explicitly unsecured HTTP demonstration.
 
-**The QR opens but no applicable PID can be shared**: `make demo-eudi` does not
+**The QR opens but no applicable PID can be shared**: the demo does not
 onboard the wallet or issue a PID. Use a v0.5.0-compatible test wallet with a
 trusted `urn:eudi:pid:nl:1` credential. Mock BSN `999991772` is the persona that
 has data for all three offers. Also verify that the wallet trusts the issuer
 and reader CA certificates installed under `.local/secrets/development-ca`.
 
-**`make publish-trust-lists` fails with `requires its own GBO root`**: the
+**`aspire/scripts/provision.sh publish-trust-lists` fails with `requires its own GBO root`**: the
 issuer or reader CA files are not the GBO CAs (CN `ca.gbo-issuer` and
 `ca.gbo-reader`). Put the four CA files under `.local/secrets/development-ca/`
-(or `ONBOARDING_SECRETS_DIR`), then run the provisioning again. Published
+(or the directory `Gbo:SecretsDir` points at), then run the provisioning again. Published
 wallet builds trust only the managed CAs; a CA of your own works only with a
 wallet you build yourself.
 
 **`source metadata unavailable`**: reconciliation did not produce a usable
-activation. Rerun the complete idempotent sequence and inspect the reconciler
-output:
-
-```bash
-make onboard-demo-sources
-make eudi-config
-docker compose --profile eudi up --build --force-recreate -d \
-  eudi-adapter eudi-issuance-server developer-portal landing-page
-```
+activation. Read the `source-reconciler` console log, then restart in the
+dashboard, in this order: `source-reconciler`, `eudi-issuance-materialize`,
+`eudi-issuance-server`, `eudi-adapter`.
 
 **The wallet fails after PID sharing and the issuance-server logs `requested
 credential previews not found in session`**: compare the public and local
@@ -233,7 +250,7 @@ the issuance hostname means a broad cache rule is overriding the origin's
 purge the hostname, reload the QR page, and scan a newly generated QR.
 
 ```bash
-set -a; . ./.env; set +a
+EUDI_PUBLIC_URL=$(cd aspire && aspire secret get Parameters:eudi-public-url --non-interactive | tail -1)
 curl -sSI "${EUDI_PUBLIC_URL%/}/.well-known/openid-credential-issuer" \
   | grep -Ei 'cf-cache-status|age|cache-control'
 curl -s "${EUDI_PUBLIC_URL%/}/.well-known/openid-credential-issuer" \
@@ -251,18 +268,31 @@ environment.
 
 ## Developer portal shows empty tabs
 
-Expected with `make demo-minimal` (base only) and `make demo-eudi`: DvTP tabs are empty because `dienstverlener-backend` + `consent-portal-backend` are not running. Use `make demo-full` or `make demo` to bring them up.
+Expected without the `dvtp` profile: the DvTP tabs are empty because
+`dienstverlener-backend` and `consent-portal-backend` are not running. Start
+with the default (dvtp) or `Gbo__Profiles=full`.
+
+## Traces or decision details are missing in the developer portal
+
+Locally the portal reads traces and the PDP's decision log from the Aspire
+dashboard. Check that the `otel-collector` resource is healthy and that the
+dashboard's Traces page shows the request. The portal only sees the current
+run: after an AppHost restart, earlier traces are in the dashboard's
+Recordings drawer, not in the portal. Spans older than the dashboard's limits
+(100,000 traces) are evicted.
 
 ## Reset to a clean state
 
+Stop the AppHost with Ctrl+C, then remove the volumes it created (all named
+`gbo-*`):
+
 ```bash
-make demo-down
-make clean
+docker volume ls -q --filter name='^gbo-' | xargs docker volume rm
 ```
 
 For a full FSC wipe (including contracts and locally generated FSC
 certificates):
 
 ```bash
-make fsc-clean
+aspire/scripts/fsc-clean.sh
 ```

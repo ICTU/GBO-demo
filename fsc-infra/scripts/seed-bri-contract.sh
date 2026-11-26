@@ -8,7 +8,7 @@
 # demo has:
 #   bri -> bron-sidecar     -> graphql-server     (BD bronprofiel)
 #   brp -> brp-sidecar      -> brp-graphql-server (BRP bronprofiel)
-# See the Makefile targets fsc-seed-bri / fsc-seed-brp.
+# aspire/apphost.go runs it once per service, as the fsc-seed-* steps.
 #
 # Background:
 #   The flow was originally set up manually via the Controller UIs.
@@ -44,8 +44,8 @@ CONSUMER_PEER_ID="${CONSUMER_PEER_ID:-99999999900000000100}"   # EDI-issuer-org 
 PROVIDER_PEER_ID="${PROVIDER_PEER_ID:-99999999900000000200}"
 DIR_PEER_ID="${DIR_PEER_ID:-99999999900000000000}"   # Directory-peer
 
-# Endpoints — in-network hostnames. Script runs in fsc-infra_default via
-# `docker run` (the Makefile target arranges this). Manager and
+# Endpoints — in-network hostnames. Script runs in a container on the
+# AppHost's network (aspire/apphost.go arranges this). Manager and
 # Controller accept mTLS with each org's internal-cert set.
 PROVIDER_CONTROLLER_URL="${PROVIDER_CONTROLLER_URL:-https://bd-controller:9444}"
 PROVIDER_MANAGER_URL="${PROVIDER_MANAGER_URL:-https://bd-manager:9443}"
@@ -66,7 +66,7 @@ SERVICE_INWAY_ADDRESS="${SERVICE_INWAY_ADDRESS:-https://bd-inway:443}"
 # (#473): the bron-sidecar takes the subject from the consent token, not from
 # a declared identifier format. The parameter stays for properties to come.
 # Requires OpenFSC >= v2.0.0 on every peer on the contract; the demo pins
-# v2.4.0 (fsc-infra/docker-compose.yml).
+# v2.4.0 (fscVersion in aspire/apphost.go).
 default_grant_properties='{}'
 GRANT_PROPERTIES="${GRANT_PROPERTIES:-$default_grant_properties}"
 if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$GRANT_PROPERTIES"; then
@@ -80,6 +80,11 @@ fi
 # parts[0]).
 GRANT_LINK_PATH="${GRANT_LINK_PATH:-/bri}"
 CREATE_GRANT_LINK="${CREATE_GRANT_LINK:-true}"
+# CREATE_CONNECTION=false registers and publishes the service only. The
+# AppHost uses it for bri when the EDI issuer's peer does not run (no EUDI
+# profile): the provider side must exist for the other consumers' seeds, but
+# there is no EDI Manager to hold a connection contract.
+CREATE_CONNECTION="${CREATE_CONNECTION:-true}"
 OUTWAY_NAME="${OUTWAY_NAME:-EdiOutway-01}"
 CONSUMER_CONTROLLER_DB="${CONSUMER_CONTROLLER_DB:-fsc_edi_controller}"
 PG_HOST="${PG_HOST:-postgres}"
@@ -101,7 +106,11 @@ CONSUMER_CA="$CONSUMER_INTERNAL_DIR/intermediate_ca.pem"
 # Peer/org certs (needed for pubkey-thumbprint of the outway).
 CONSUMER_ORG_CERT="${CONSUMER_ORG_CERT:-$FSC_INFRA_DIR/orgs/edi-issuer/pki/org/edi-issuer.pem}"
 
-for f in "$PROVIDER_CERT" "$PROVIDER_KEY" "$PROVIDER_CA" "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" "$CONSUMER_ORG_CERT"; do
+required_files=("$PROVIDER_CERT" "$PROVIDER_KEY" "$PROVIDER_CA")
+if [ "$CREATE_CONNECTION" = "true" ]; then
+  required_files+=("$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" "$CONSUMER_ORG_CERT")
+fi
+for f in "${required_files[@]}"; do
   if [ ! -f "$f" ]; then
     echo "missing cert file: $f" >&2
     echo "provision the consumer and provider FSC certificates first" >&2
@@ -201,6 +210,13 @@ else
   done
   [ "${st:-}" = "CONTRACT_STATE_VALID" ] ||
     fail_unsigned "publication contract for '$SERVICE_NAME'" "${st:-}"
+fi
+
+if [ "$CREATE_CONNECTION" != "true" ]; then
+  echo "[3/4] and [4/4] skipped: no connection contract requested (CREATE_CONNECTION=$CREATE_CONNECTION)"
+  echo
+  echo "Contract-seed done: '$SERVICE_NAME' is registered and published."
+  exit 0
 fi
 
 # ── 3. Create connection contract in consumer Manager ───────────────────────────

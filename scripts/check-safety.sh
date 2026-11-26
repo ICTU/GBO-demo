@@ -5,7 +5,7 @@
 # No allowlist: replace a flagged test value (demo OINs start with
 # 99999999), remove a real one.
 #
-#   scripts/check-safety.sh [-v] [path]    # or: make check-safety
+#   scripts/check-safety.sh [-v] [path]
 
 set -euo pipefail
 

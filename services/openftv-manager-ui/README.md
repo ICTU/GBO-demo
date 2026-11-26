@@ -26,7 +26,7 @@ the same permissions with Cedar, so bypassing the UI does not bypass the
 read-only restriction.
 
 Set `KEYCLOAK_ADMIN_PASSWORD`, `FTV_MANAGER_AUDITOR_PASSWORD` and
-`FTV_MANAGER_DEPLOY_PASSWORD` before running `make demo-manager`
+`FTV_MANAGER_DEPLOY_PASSWORD` before running `Gbo__Profiles=manager aspire run`
 (`FTV_POSTGRES_PASSWORD` is needed by every demo target, not just this one). Store them as CI/CD secrets; none belongs in frontend
 configuration. The deployment identity uses a short-lived OIDC access token
 and is only intended for `scripts/seed-openftv-manager.py`.
@@ -43,9 +43,9 @@ and is only intended for `scripts/seed-openftv-manager.py`.
 ## Reaching it from another machine
 
 `VITE_OIDC_AUTHORITY`, `VITE_PAP_BASE_URL` and `VITE_PIP_BASE_URL` are read by
-the **browser**, not from inside the compose network. Set `GBO_PUBLIC_HOST` to
-the host's LAN address before `docker compose up`, or the page will try to
+the **browser**, not from inside the container network. Start the AppHost with
+`--Gbo:PublicHost=<the host's LAN address>`, or the page will try to
 reach `localhost` on the machine you are browsing from. The login needs a
 secure context, so off localhost serve the demo over https with
-`GBO_PUBLIC_SCHEME=https` (see "HTTPS behind a reverse proxy" in the main
+`--Gbo:PublicScheme=https` (see "HTTPS behind a reverse proxy" in the main
 README).

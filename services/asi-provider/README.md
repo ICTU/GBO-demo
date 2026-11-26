@@ -15,21 +15,21 @@ A mock Authentic Source Interface Provider. A qualified trust service provider (
 
 ## Run
 
-In the demo stack, after `make demo-eudi` or `make demo-full`:
+In the demo stack, after `Gbo__Profiles=eudi aspire run` or `Gbo__Profiles=full aspire run`:
 
 ```bash
-make demo-eudi
-make demo-asi
+Gbo__Profiles=eudi aspire run      # in aspire/
+Gbo__Profiles=full,asi aspire run  # in aspire/
 ```
 
-The ASIP reads the sources' descriptions from the active Source Registry release, which `make demo-eudi` onboards; see [Source descriptions](#source-descriptions).
+The ASIP reads the sources' descriptions from the active Source Registry release, which `Gbo__Profiles=eudi aspire run` onboards; see [Source descriptions](#source-descriptions).
 
-This adds the ASIP's FSC peer (OIN `99999999900000001200`, compose profile `asi`), lists it in the onboarding register with source peer `…0200`, seeds its connection contract for the BRP source (`brp`) with the grant link `/brp` on its Outway, issues the development seal certificate when missing, and starts both services: the authorization server on `GBO_PORT_ASI_AUTHORIZATION_SERVER` (default 9425) and the ASIP on `GBO_PORT_ASI_PROVIDER` (default 9424). Both are reached from the host: the issuer and the ASIP's public URL are host addresses (`http://<GBO_PUBLIC_HOST>:<port>`, or `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` and `ASI_PROVIDER_PUBLIC_URL`; set `GBO_PUBLIC_HOST` to the LAN address when the QTSP or the browser runs on another machine), and the ASIP fetches the authorization server's keys on its internal address (`ASIP_AUTHORIZATION_SERVER_INTERNAL_URL`).
+This adds the ASIP's FSC peer (OIN `99999999900000001200`, AppHost profile `asi`), lists it in the onboarding register with source peer `…0200`, seeds its connection contract for the BRP source (`brp`) with the grant link `/brp` on its Outway, issues the development seal certificate when missing, and starts both services: the authorization server on port 9425 and the ASIP on port 9424. Both are reached from the host: the issuer and the ASIP's public URL are host addresses (`http://<GBO_PUBLIC_HOST>:<port>`, or `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` and `ASI_PROVIDER_PUBLIC_URL`; set `Gbo:PublicHost` to the LAN address when the QTSP or the browser runs on another machine), and the ASIP fetches the authorization server's keys on its internal address (`ASIP_AUTHORIZATION_SERVER_INTERNAL_URL`).
 
 On its own, it needs an Outway with a contract for `brp` and the Source Registry; outside the stack every query then answers 503:
 
 ```bash
-make provision-asip-seal-certificate
+# runs as the AppHost's provision-asip-seal-certificate step; by hand: see apphost.go
 cd services/asi-provider
 ASIP_SEAL_KEY_FILE=../../.local/secrets/asi-provider/seal-key.pem \
 ASIP_SEAL_CERT_FILE=../../.local/secrets/asi-provider/seal-cert.pem \
@@ -146,7 +146,7 @@ Implementing Regulation (EU) 2025/1569 Article 9(4), as amended by Implementing 
 
 This mock seals the exact response body with a detached JWS (RFC 7515, appendix F) in the `X-JWS-Signature` header: `<protected header>..<signature>`, algorithm ES256, the certificate chain in `x5c` (leaf first). The body stays plain JSON as the OpenAPI specifies. A client validates the signature over the received body and the chain against its trust anchors.
 
-`make provision-asip-seal-certificate` issues the seal certificate from the development issuer CA in `$(DEVELOPMENT_CA_DIR)`. In production this must be a qualified certificate for electronic seals (Implementing Regulation (EU) 2025/1943, Annex II), with the organisation's registration number as `organizationIdentifier`; who holds it is open (#225).
+the AppHost's `provision-asip-seal-certificate` step issues the seal certificate from the development issuer CA in `$(DEVELOPMENT_CA_DIR)`. In production this must be a qualified certificate for electronic seals (Implementing Regulation (EU) 2025/1943, Annex II), with the organisation's registration number as `organizationIdentifier`; who holds it is open (#225).
 
 ## Interpretations
 

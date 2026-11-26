@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
+  // Outside node_modules: the AppHost's installers run `npm ci`, which would
+  // wipe Vite's dependency pre-bundling on every start.
+  cacheDir: '.vite',
   plugins: [react()],
   worker: {
     // Vite 8 defaults worker bundles to iife, which breaks code-splitting
@@ -10,6 +13,8 @@ export default defineConfig({
   },
   server: {
     port: 9003,
+    // Fail instead of moving to the next free port: the other apps link here.
+    strictPort: true,
     host: true,
     watch: {
       usePolling: process.env.CHOKIDAR_USEPOLLING === 'true',
@@ -51,11 +56,6 @@ export default defineConfig({
       },
       '/eudi-offers.json': {
         target: process.env.EUDI_API_TARGET ?? 'http://localhost:9409',
-        changeOrigin: true,
-      },
-      '/jaeger-api': {
-        target: process.env.JAEGER_API_TARGET ?? 'http://localhost:9686',
-        rewrite: (p) => p.replace(/^\/jaeger-api/, ''),
         changeOrigin: true,
       },
       // The bron-playground queries these same-origin, so the browser needs

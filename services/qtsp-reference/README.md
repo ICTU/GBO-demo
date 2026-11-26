@@ -56,7 +56,7 @@ The issued SD-JWT VC has VCT `https://gbo.ictu.nl/credentials/qtsp-attestation/v
 
 The existing central `eudi-issuance-server` remains unmodified. Its generated configuration adds a separate usecase and QTSP reader, issuer and status-list certificates. The QTSP callback listens only on the Compose networks under `https://qtsp-reference:4443/attestations/<secret>`; the secret path is generated with the certificates and shared only through their mounted directory. Its server certificate chains to the development issuer CA pinned by the issuance server. The path prevents other containers from calling the obvious endpoint accidentally, but it is not a replacement for client authentication. There is no client-certificate support in the configured callback client, so the internal network boundary remains a deliberate demo shortcut.
 
-Missing QTSP issuance certificates do not take down either route: the QTSP logs a warning and continues without the wallet action, while the central materializer warns and emits the ordinary source-issuance configuration. A partial certificate set remains a startup error. `make demo-asi` provisions the set when `EUDI_PUBLIC_URL` is configured.
+Missing QTSP issuance certificates do not take down either route: the QTSP logs a warning and continues without the wallet action, while the central materializer warns and emits the ordinary source-issuance configuration. A partial certificate set remains a startup error. `Gbo__Profiles=full,asi aspire run` provisions the set when `EUDI_PUBLIC_URL` is configured.
 
 ## CLI
 
@@ -76,15 +76,15 @@ Test-harness options provoke the error answers of the acceptance criteria:
 
 The exit code is 0 for an accepted result, 2 for an error answer of the ASIP, 3 for a result whose seal is invalid, 4 for a denial, and 1 for other failures. The CLI prints no token and no BSN.
 
-In compose:
+Under the AppHost:
 
 ```bash
-docker compose exec qtsp-reference ./qtsp-reference verify --attr 'https://gbo.example/attributes/family_name/1={"family_name":"Jansen"}'
+docker exec "$(docker ps -q --filter label=com.docker.compose.service=qtsp-reference)" ./qtsp-reference verify --attr 'https://gbo.example/attributes/family_name/1={"family_name":"Jansen"}'
 ```
 
 ## Run
 
-`make demo-asi` starts it on `GBO_PORT_QTSP` (default 9427), with a test QTSP certificate from the development reader CA (`make provision-asip-qtsp-certificate`, entered in the authorization server's stub register).
+`Gbo__Profiles=full,asi aspire run` starts it on port 9427, with a test QTSP certificate from the development reader CA (the AppHost's `provision-asip-qtsp-certificate` step, entered in the authorization server's stub register).
 
 Configuration:
 - `QTSP_ADDR` (default `:4023`);

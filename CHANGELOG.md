@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Tracing in `ldv-logboek`**: the logbooks export request spans over OTLP
+  and take the caller's `traceparent` over.
+- **`aspire/scripts/provision.sh`**: one-off host provisioning steps, from
+  the former Makefile targets: trust-list signer, trust lists, registrar
+  root, wallet registration, test PID, QTSP wallet registration and the ASI
+  wallet verifiers.
+- **`aspire/scripts/fsc-clean.sh`**: replaces `make fsc-clean`.
 - **Consent flow with a pushed authorization request** (#427, #648): a
   service provider pushes its consent request to the consent portal over FSC
   (RFC 9126), the citizen decides in the toestemmingsportaal, and the
@@ -635,7 +642,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
-- **The safety audit runs in CI** (`safety` job, `make check-safety`) and
+- **No secret values in the AppHost**: the logbook tokens, the subject
+  pseudonym keys and the subject reference key are generated on the first
+  run and kept in the AppHost user secrets, like the database passwords.
+  They had fixed `local-demo-...` values. Logbook records written under the
+  old pseudonym keys no longer match a lookup by citizen.
+- **The default (dvtp) demo no longer starts what only the EUDI flows use**:
+  the EDI issuer's FSC peer, the unsecured demo source and the EUDI
+  adapter's logbook start with the EUDI profiles only. `fsc-seed-bri` then
+  registers and publishes `bri` without the EDI connection
+  (`CREATE_CONNECTION=false` in `seed-bri-contract.sh`), the developer portal
+  reads the transaction logs of the peers that run, and the landing page
+  leaves the EUDI consumer's Controller link out (`EUDI_FSC_AVAILABLE`).
+- **The demo runs on Aspire** (`aspire/apphost.go`, Aspire 17): one
+  Go AppHost replaces `docker-compose.yml`,
+  `fsc-infra/docker-compose.yml`, `docker-compose.cloudflare-tunnel.yml` and
+  the Makefile. `aspire run` replaces `make demo`, and
+  `Gbo__Profiles=full aspire run` replaces `make demo-full`. The other compose
+  profiles are AppHost profiles (`Gbo__Profiles`); see `aspire/README.md`.
+  - **Bootstrap:** the AppHost orders the FSC PKI, migrations, contract
+    seeds, source onboarding and the host-side certificate steps itself, as
+    run-once resources. The OpenFSC peers come from one `AddFscPeer`
+    helper, and only the peers a profile needs start.
+  - **Settings and secrets:** passwords are generated on the first run and
+    kept in the AppHost user secrets. The public URLs are parameters. The
+    other former `.env` settings are `Gbo:*` settings.
+  - **Gate:** `scripts/policy-check.sh` runs before the PDP starts, so a
+    broken Rego module stops the start.
+  - **Frontends:** they run as Vite dev servers on the host (Node.js 24 or
+    newer).
+  - **Grouping:** containers carry the compose labels of their own project,
+    `gbo-demo-aspire`, so Docker Desktop and OrbStack group them.
+- **Local observability is the Aspire dashboard**:
+  - The developer portal reads traces (`/api/dev/traces/{id}`) and the PDP's
+    console decision log from the dashboard's telemetry API.
+  - The PDP image runs the PDP under `logtee`, which exports its console as
+    OTLP log records.
+  - Without `TELEMETRY_API_URL`, dev-portal-backend reads Jaeger
+    (`JAEGER_QUERY_URL`) and Loki as before, so the simulation deployment is
+    unchanged.
+- **OTLP endpoint URLs**: the Go services hand an `OTEL_EXPORTER_OTLP_ENDPOINT`
+  with a scheme (`http://otel-collector:4317`, as Aspire sets it) to the OTel
+  SDK, which also reads the headers and TLS settings from the environment. A
+  bare `host:port` keeps the old plaintext connection.
+- **The safety audit runs in CI** (`safety` job, `scripts/check-safety.sh`) and
   scans every tracked file. It now flags OINs with a real register prefix;
   test data uses demo OINs (`99999999…`) instead.
 - **The demo starts in order through compose instead of retries and
@@ -1225,6 +1275,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   the ICTU GitHub policy.
 
 ### Removed
+- The compose files and the Makefile.
+- `.env.example`, `fsc-infra/.env.example` and the `GBO_PORT_*`/`FSC_PORT_*`
+  port overrides. Ports are fixed in the AppHost where a URL or certificate
+  needs them, and assigned per run otherwise.
+- `scripts/update-env.py`.
+- `scripts/wait-openftv-admission.sh`, now the AppHost's `pdp-admission`
+  step.
+- `certs/generate.sh`, which nothing consumed.
+- The local Jaeger, Loki, Grafana and Promtail containers and
+  `observability/`. `otel/collector-config.yaml` stays for the simulation
+  deployment.
+- The developer portal's `/jaeger-api` proxy (Vite and nginx).
 - **Unused code paths are gone.** The `eudi-adapter` no longer writes
   `source-release.json` next to a materialized configuration; nothing read
   it. Materializing still prints the release id, and the adapter still logs

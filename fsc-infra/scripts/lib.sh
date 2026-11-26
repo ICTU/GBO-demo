@@ -74,13 +74,13 @@ fail_unsigned() {
     echo "  The counterparty did not counter-sign. Contract acceptance is a"
     echo "  policy decision; read the reason from the PDP:"
     echo ""
-    echo "    docker compose logs --no-log-prefix openftv-pdp \\"
-    echo "      | grep auto_sign_contract | tail -1 | jq .result.response"
+    echo "    the openftv-pdp console log in the Aspire dashboard: search for"
+    echo "    auto_sign_contract and read .result.response"
     echo ""
     echo "  ADMISSION_REGISTER_UNAVAILABLE: the PDP could not read the onboarding"
     echo "  register. Check that dvtp-onboarding-register is running."
     echo "  PARTY_NOT_IN_REGISTRY: the register answered, but the peer is absent."
-    echo "  Add it at http://localhost:${GBO_PORT_DVTP_ONBOARDING_REGISTER:-9415}"
+    echo "  Add it in the dvtp-onboarding-register (its URL is in the Aspire dashboard)"
     echo "  and re-run."
   } >&2
   exit 1

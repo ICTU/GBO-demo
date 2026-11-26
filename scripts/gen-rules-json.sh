@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Same pinned image as OPA_IMAGE in the Makefile and CI.
+# Same pinned image as OPA_IMAGE in scripts/policy-check.sh and CI.
 OPA_IMAGE="${OPA_IMAGE:-openpolicyagent/opa:1.9.0-static@sha256:60b6af32b58377718546ac7d4634eecbfe50ec36f7d3ca3f8ebf515f9826c2ac}"
 OUT=services/dev-portal-backend/rules.json
 

@@ -10,5 +10,7 @@ window.__GBO_RUNTIME_CONFIG__ = {
   fscControllerBronUrl: "${FSC_CONTROLLER_BRON_URL}",
   fscControllerDvtpUrl: "${FSC_CONTROLLER_DVTP_URL}",
   fscControllerEudiUrl: "${FSC_CONTROLLER_EUDI_URL}",
-  versionString: "${VERSION_STRING}"
+  versionString: "${VERSION_STRING}",
+  dvtpAvailable: "${DVTP_AVAILABLE}",
+  eudiFscAvailable: "${EUDI_FSC_AVAILABLE}"
 }

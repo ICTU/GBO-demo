@@ -1,14 +1,36 @@
 # Observability
 
-The local Compose environment and the simulation deployment use the same
-three observability data paths:
+Local runs under the Aspire AppHost and the simulation deployment use the
+same data paths, with a different store at the end:
 
 1. Application traces are sent over OTLP to a gateway collector.
-2. The collector stores traces in Jaeger and also forwards them to
+2. The collector stores them and also forwards them to
    `dev-portal-backend/v1/traces` for the live architecture strip.
-3. Container logs are shipped to Loki. The developer portal reads the policy
-   engine's console decision log from Loki as detail next to the
-   Authorization Decision Log, while Grafana provides the broader log view.
+3. The policy engine's console decision log reaches a log store. The
+   developer portal reads it from there as detail next to the
+   Authorization Decision Log.
+
+| | Local (`aspire run`) | Simulation deployment |
+| --- | --- | --- |
+| Collector configuration | `aspire/otel-collector.yaml` | `otel/collector-config.yaml` |
+| Trace store | Aspire dashboard | Jaeger |
+| Log store | Aspire dashboard (OTLP logs) | Loki (container logs) |
+| Portal reads traces and the decision log from | the dashboard's telemetry API | Jaeger's query API and Loki |
+
+Locally the Aspire dashboard is the one store for traces, logs and metrics,
+and it keeps each run separately (Run persistence, Aspire's default): the
+dashboard and its telemetry API show the current run, and the Recordings
+drawer opens the last 10 runs read-only (pin a run to keep it). It is a development
+tool, not a durable store: it caps at 100,000 traces and 100,000 log
+records, and has no backups or encryption at rest. That is why the
+simulation deployment keeps Jaeger and Loki.
+
+The PDP (OpenFTV) has no OpenTelemetry instrumentation of its own, and its
+decision log is console output. The PDP image therefore runs it under
+`logtee` (`services/openftv-pdp/logtee`), which passes the console through
+unchanged and, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, also exports each
+line as an OTLP log record. In the simulation deployment the console still
+reaches Loki the way every container's output does.
 
 The simulation platform currently has no stable, tenant-consumable core OTLP
 or Loki endpoint in its tenant contract. The fallback is therefore deployed
@@ -45,8 +67,8 @@ The production developer-portal image accepts these runtime variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `JAEGER_PUBLIC_URL` | Public Jaeger UI used by trace links |
-| `GRAFANA_PUBLIC_URL` | Public Grafana UI used by log links |
+| `JAEGER_PUBLIC_URL` | Public trace UI used by trace links: a Jaeger base URL, or a template with `{traceId}` (the Aspire dashboard) |
+| `GRAFANA_PUBLIC_URL` | Public Grafana UI used by log links; empty hides them |
 | `EUDI_PUBLIC_URL` | Public issuance-server URL |
 
 `dev-portal-backend` accepts:
@@ -54,7 +76,10 @@ The production developer-portal image accepts these runtime variables:
 | Variable | Purpose |
 | --- | --- |
 | `ADL_DATABASE_URL` | Authorization Decision Log, read with a SELECT-only role |
-| `LOKI_URL` | Loki base URL |
+| `TELEMETRY_API_URL` | The Aspire dashboard. Set, traces and the decision log come from its telemetry API |
+| `TELEMETRY_API_KEY` | The dashboard's telemetry API key (`AppHost:DashboardApiKey`) |
+| `JAEGER_QUERY_URL` | Jaeger query API, without `TELEMETRY_API_URL` (default `http://jaeger:16686`) |
+| `LOKI_URL` | Loki base URL, without `TELEMETRY_API_URL` |
 | `LOKI_DECISION_QUERY` | LogQL selector for the engine's console decision log |
 | `FSC_TXLOG_*_URL/CERT/KEY/CA` | Local txlog-api or remote Manager logging source |
 
@@ -71,7 +96,7 @@ masks anything. OpenFTV's ADL has no masking option, and the console log
 ignores `data.system.log.mask`. A BSN in the request therefore reaches both;
 how to keep it out is still open.
 
-Jaeger and Loki are debugging stores, not audit stores. The simulation
+Jaeger, Loki and the Aspire dashboard are debugging stores, not audit stores. The simulation
 deployment uses seven-day retention. OpenFSC transaction logs remain the
 authoritative per-hop message metadata, and the Authorization Decision Log the
 authoritative record of each authorization decision.
@@ -85,7 +110,7 @@ AuthZEN request and response: the decision, and on a denial the policy's
 reason code, which OpenFTV carries in `reason_user.en`.
 
 The embedded OPA also writes a "Decision Log" line to stdout for every
-evaluation, and promtail ships it to Loki. That line carries the whole policy
+evaluation, which reaches the log store (above). That line carries the whole policy
 result, including which rule granted or denied each field. It is
 observability, and nothing may cite it as the record of a decision. The
 developer portal shows both side by side, the ADL record as the decision and
@@ -107,8 +132,8 @@ is best-effort exhaust of a technical operation, sampled and short-lived,
 while an LDV record is an administrative record that must exist for every
 processing, is confirmed on write, and is never sampled.
 
-Nothing in this document changes because of it. The collector, Jaeger, Loki
-and Grafana are untouched; the logbooks are additional stores with their own
+Nothing in this document changes because of it. The collector and the trace
+and log stores are untouched; the logbooks are additional stores with their own
 guarantees. A component makes its record durable in a local outbox before
 its response leaves and delivers it to the logbook afterwards, with retries.
 It fails its request when that local write fails rather than dropping the

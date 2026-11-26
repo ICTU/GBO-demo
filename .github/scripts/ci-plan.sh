@@ -74,6 +74,7 @@ ldv-client
 ldv-logboek
 lvg-graphql-server
 oid4vc-kit
+openftv-pdp/logtee
 qtsp-reference
 source-registry
 test-pid-source
@@ -207,7 +208,7 @@ if matches_any 'policies/*'; then
   docker="$(append_unique "${docker}" 'openftv-pdp')"
 fi
 
-if matches_any 'schemas/pdp-mirror/*' 'docker-compose.yml'; then
+if matches_any 'schemas/pdp-mirror/*' 'aspire/apphost.go'; then
   docker="$(append_unique "${docker}" 'openftv-pdp')"
 fi
 
