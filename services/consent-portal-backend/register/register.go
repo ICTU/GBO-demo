@@ -1,6 +1,8 @@
 // Package register talks to the consent register, which stores a portal-scoped
-// subject reference and sees the encrypted values per party only transiently
-// while issuing a signed token.
+// subject reference and signs the encrypted values per party into a token. It
+// keeps those values, which it cannot read, only for a consent that can be
+// refreshed and only while that consent runs; no answer returns them except
+// inside a signed token.
 // There is no method here that accepts a BSN, and there must never be one.
 //
 // The adapter translates representations; it does not decide outcomes. No
@@ -11,9 +13,12 @@ package register
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"gbo-demo/consent-portal-backend/consent"
@@ -28,11 +33,15 @@ type Client struct {
 
 func (c Client) Create(ctx context.Context, d consent.Draft) (consent.Record, error) {
 	var out struct {
-		ConsentID    string `json:"consent_id"`
-		ConsentToken string `json:"consent_token"`
+		ConsentID    string    `json:"consent_id"`
+		ConsentToken string    `json:"consent_token"`
+		ExpiresAt    time.Time `json:"expires_at"`
+		RefreshToken string    `json:"refresh_token"`
 	}
-	// The encrypted values are transient token material. subject_ref is the
-	// only subject value the consent register persists and returns.
+	// The encrypted values are token material. Without client_peer the
+	// register signs them and forgets them; with it, it keeps them while the
+	// consent runs, to sign a refreshed token. subject_ref is the only
+	// subject value the register lists and returns.
 	encrypted := make(map[string]any, len(d.Subjects))
 	for _, subject := range d.Subjects {
 		values := map[string]any{
@@ -43,7 +52,7 @@ func (c Client) Create(ctx context.Context, d consent.Draft) (consent.Record, er
 		}
 		encrypted[subject.Party.OIN] = values
 	}
-	_, err := c.Caller.DoPrivate(ctx, "Create Consent", http.MethodPost, c.Base+"/consents", map[string]any{
+	body := map[string]any{
 		"encrypted_subject":  encrypted,
 		"subject_ref":        string(d.SubjectRef),
 		"dienstverlener_oin": d.DienstverlenerOIN,
@@ -51,11 +60,63 @@ func (c Client) Create(ctx context.Context, d consent.Draft) (consent.Record, er
 		"scope_entries":      d.ScopeEntries,
 		"use_case":           d.UseCase,
 		"validity_seconds":   d.ValiditySeconds,
-	}, &out)
+	}
+	if d.ClientPeer != "" {
+		body["client_peer"] = string(d.ClientPeer)
+	}
+	_, err := c.Caller.DoPrivate(ctx, "Create Consent", http.MethodPost, c.Base+"/consents", body, &out)
 	if err != nil {
 		return consent.Record{}, err
 	}
-	return consent.Record{ID: out.ConsentID, SubjectRef: d.SubjectRef, Token: out.ConsentToken}, nil
+	if out.ExpiresAt.IsZero() {
+		return consent.Record{}, errors.New("the register sent no expires_at for the consent token")
+	}
+	return consent.Record{
+		ID:             out.ConsentID,
+		SubjectRef:     d.SubjectRef,
+		Token:          out.ConsentToken,
+		TokenExpiresAt: out.ExpiresAt,
+		RefreshToken:   out.RefreshToken,
+	}, nil
+}
+
+// Refresh asks the register for a new token of the consent refreshToken
+// belongs to, for client. The register's refusals invalid_grant and
+// invalid_scope become consent.ErrInvalidGrant and consent.ErrInvalidScope;
+// anything else, invalid_request included (the portal checks what that code
+// stands for before it calls), is the register's failure.
+func (c Client) Refresh(ctx context.Context, refreshToken string, client consent.PeerID, scopes []string) (consent.Proof, error) {
+	body := map[string]any{"refresh_token": refreshToken, "client_peer": string(client)}
+	if len(scopes) > 0 {
+		body["scope"] = strings.Join(scopes, " ")
+	}
+	var out struct {
+		ConsentID    string    `json:"consent_id"`
+		ConsentToken string    `json:"consent_token"`
+		ExpiresAt    time.Time `json:"expires_at"`
+		Scopes       []string  `json:"scopes"`
+	}
+	_, err := c.Caller.DoPrivate(ctx, "Refresh Consent Token", http.MethodPost, c.Base+"/proofs/refresh", body, &out)
+	var refused *upstream.StatusError
+	if errors.As(err, &refused) && refused.Status == http.StatusBadRequest {
+		var answer struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(refused.Body, &answer)
+		switch answer.Error {
+		case "invalid_grant":
+			return consent.Proof{}, fmt.Errorf("%w: the register refused the refresh token", consent.ErrInvalidGrant)
+		case "invalid_scope":
+			return consent.Proof{}, fmt.Errorf("%w: the scope is not the whole consent", consent.ErrInvalidScope)
+		}
+	}
+	if err != nil {
+		return consent.Proof{}, err
+	}
+	if out.ConsentToken == "" || out.ExpiresAt.IsZero() {
+		return consent.Proof{}, errors.New("the register sent no consent token or no expires_at on a refresh")
+	}
+	return consent.Proof{ConsentID: out.ConsentID, ConsentToken: out.ConsentToken, ExpiresAt: out.ExpiresAt, Scopes: out.Scopes}, nil
 }
 
 func (c Client) ListBySubject(ctx context.Context, subject consent.SubjectRef) ([]consent.Record, error) {

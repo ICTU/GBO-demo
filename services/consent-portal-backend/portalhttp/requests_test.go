@@ -96,6 +96,10 @@ func (f *fakeRegister) KeepPolymorphic(context.Context, consent.SubjectRef, cons
 	return nil
 }
 
+func (f *fakeRegister) Refresh(context.Context, string, consent.PeerID, []string) (consent.Proof, error) {
+	return consent.Proof{}, consent.ErrInvalidGrant
+}
+
 func (f *fakeRegister) consents() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

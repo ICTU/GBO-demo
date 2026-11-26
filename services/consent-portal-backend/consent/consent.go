@@ -103,9 +103,12 @@ type ScopeEntry struct {
 	ConsentedFields []string `json:"consented_fields"`
 }
 
-// Draft is a consent about to be registered. Subjects is transient token
-// material; SubjectRef is the only persisted subject. There is deliberately no
-// field that would accept a BSN.
+// Draft is a consent about to be registered. Subjects is token material:
+// without ClientPeer the register signs it into the token and forgets it;
+// with ClientPeer it keeps it, unreadable to itself, only while the consent
+// runs, so a refresh can sign it again. SubjectRef is the only subject the
+// register lists a consent by. There is deliberately no field that would
+// accept a BSN.
 type Draft struct {
 	Subjects          []EncryptedSubject
 	SubjectRef        SubjectRef
@@ -114,6 +117,10 @@ type Draft struct {
 	ScopeEntries      []ScopeEntry
 	UseCase           string
 	ValiditySeconds   int
+	// ClientPeer is the FSC peer of the client that pushed the request and
+	// will exchange the code. When set, the register binds a refresh token
+	// to it. Empty for the direct developer API, which gets none.
+	ClientPeer PeerID
 }
 
 // Record is a register record as the core understands it: the few fields the
@@ -149,10 +156,15 @@ type Record struct {
 	ID         string
 	SubjectRef SubjectRef
 	Token      string
-	Status     string    // as reported by the register, e.g. "ACTIVE"/"REVOKED"
-	ValidUntil time.Time // zero value means no expiry
-	Raw        map[string]any
-	Effective  Status
+	// TokenExpiresAt is the exp of Token, and RefreshToken the token a
+	// client refreshes it with. Only Create fills them, and RefreshToken
+	// only for a draft with a ClientPeer.
+	TokenExpiresAt time.Time
+	RefreshToken   string
+	Status         string    // as reported by the register, e.g. "ACTIVE"/"REVOKED"
+	ValidUntil     time.Time // zero value means no expiry
+	Raw            map[string]any
+	Effective      Status
 }
 
 // EffectiveStatus is the rule the citizen-facing UI depends on: a consent is

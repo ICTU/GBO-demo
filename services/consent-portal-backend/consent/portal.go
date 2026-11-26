@@ -105,17 +105,26 @@ type GiveInput struct {
 	ValiditySeconds   int
 	UseCase           string // the dienstverlener's stated purpose; DefaultUseCase when empty
 	Trigger           string // "dev-portal" when the dev-portal drove this; narrative only
+	// ClientPeer is the FSC peer a refresh token is bound to: the client of
+	// a pushed request. Empty gives no refresh token.
+	ClientPeer PeerID
 }
 
-// Granted is the result of a successful grant.
+// Granted is the result of a successful grant: the consent, its first
+// proof and that proof's exp, and the refresh token when the grant named a
+// client peer.
 type Granted struct {
-	ConsentID    string
-	ConsentToken string
+	ConsentID      string
+	ConsentToken   string
+	TokenExpiresAt time.Time
+	RefreshToken   string
 }
 
 // GiveConsent derives the portal's own reference to the citizen, has BSNk
 // make encrypted values for each source, then asks the consent register to
-// persist the reference and sign the values into the consent token. Every
+// persist the reference and sign the values into the consent token. With a
+// client peer the register also keeps the values while the consent runs and
+// gives a refresh token for that peer. Every
 // source gets a pseudonym; a source on BSNk's BSN authorisation list also gets
 // an identity.
 //
@@ -195,13 +204,19 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 		ScopeEntries:      in.ScopeEntries,
 		UseCase:           useCaseOrDefault(in.UseCase),
 		ValiditySeconds:   in.ValiditySeconds,
+		ClientPeer:        in.ClientPeer,
 	})
 	if err != nil {
 		return Granted{}, fmt.Errorf("create consent: %w", err)
 	}
 	emit("consent_granted", "consent-register", map[string]any{"consent_id": rec.ID})
 
-	return Granted{ConsentID: rec.ID, ConsentToken: rec.Token}, nil
+	return Granted{
+		ConsentID:      rec.ID,
+		ConsentToken:   rec.Token,
+		TokenExpiresAt: rec.TokenExpiresAt,
+		RefreshToken:   rec.RefreshToken,
+	}, nil
 }
 
 // encrypt has BSNk make what the token carries for each source: a pseudonym

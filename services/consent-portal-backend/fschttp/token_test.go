@@ -27,8 +27,13 @@ func tokenServer(t *testing.T, now, issuedAt time.Time) (*httptest.Server, strin
 		Provider:      hypotheekPeer,
 		RedirectURI:   returnURL,
 		CodeChallenge: validForm().Get("code_challenge"),
-		Consent:       consent.Granted{ConsentID: "c-1", ConsentToken: "signed-consent-token"},
-		Scopes:        []string{"bd:ib:2025"},
+		Consent: consent.Granted{
+			ConsentID:      "c-1",
+			ConsentToken:   "signed-consent-token",
+			TokenExpiresAt: now.Add(5 * time.Minute),
+			RefreshToken:   "refresh-token-of-c-1",
+		},
+		Scopes: []string{"bd:ib:2025"},
 	}, issuedAt)
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +86,8 @@ func TestTokenGivesTheConsentTokenOnce(t *testing.T) {
 		t.Errorf("Cache-Control = %q, want no-store", got)
 	}
 	if body["access_token"] != "signed-consent-token" || body["token_type"] != "Bearer" ||
-		body["scope"] != "bd:ib:2025" || body["consent_id"] != "c-1" {
+		body["scope"] != "bd:ib:2025" || body["consent_id"] != "c-1" ||
+		body["expires_in"] != float64(300) || body["refresh_token"] != "refresh-token-of-c-1" {
 		t.Errorf("body = %v", body)
 	}
 
@@ -133,7 +139,7 @@ func TestTokenRefusesAnUnusableRequest(t *testing.T) {
 		error  string
 	}{
 		{"no Fsc-Authorization", "", func(url.Values) {}, 401, "invalid_client"},
-		{"other grant_type", hypotheekPeer, func(f url.Values) { f.Set("grant_type", "refresh_token") }, 400, "unsupported_grant_type"},
+		{"other grant_type", hypotheekPeer, func(f url.Values) { f.Set("grant_type", "client_credentials") }, 400, "unsupported_grant_type"},
 		{"no grant_type", hypotheekPeer, func(f url.Values) { f.Del("grant_type") }, 400, "invalid_request"},
 		{"no code", hypotheekPeer, func(f url.Values) { f.Del("code") }, 400, "invalid_request"},
 		{"no redirect_uri", hypotheekPeer, func(f url.Values) { f.Del("redirect_uri") }, 400, "invalid_request"},
