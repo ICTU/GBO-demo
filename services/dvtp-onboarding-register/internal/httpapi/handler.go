@@ -190,6 +190,10 @@ func withAccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		next.ServeHTTP(w, r)
+		// Health probes poll every few seconds; /health here always answers 200.
+		if r.URL.Path == "/health" {
+			return
+		}
 		slog.Info("request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(started))
 	})
 }
