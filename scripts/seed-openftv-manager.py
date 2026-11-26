@@ -83,9 +83,9 @@ def request(
 def default_authority() -> str:
     """The issuer the Manager accepts (MANAGER_OIDC_ISSUER in docker-compose.yml).
 
-    Keycloak puts the URL the client used in the token's issuer, so the token
-    must come from that same URL, not from localhost when the demo has a
-    public host. Empty variables count as unset, as in Compose.
+    Keycloak puts the URL the client used in the token's issuer, so a token
+    requested from plain localhost is refused when the demo has a public
+    host. Empty variables count as unset, as in Compose.
     """
     explicit = os.environ.get("GBO_FTV_OIDC_AUTHORITY")
     if explicit:
