@@ -397,8 +397,32 @@ test_missing_scopes_denies_context_invalid if {
 	_denies_context_invalid(_header, object.remove(_claims, ["scopes"]))
 }
 
-test_valid_until_other_than_exp_denies_context_invalid if {
-	_denies_context_invalid(_header, object.union(_claims, {"valid_until": "2030-01-01T00:00:00Z"}))
+# exp may lie before valid_until (a short-lived proof of a longer consent),
+# never after it. The default claims have exp equal to valid_until.
+test_exp_before_valid_until_allows if {
+	token := _sign(_header, object.union(_claims, {"valid_until": "2030-01-01T00:00:00Z"}))
+	_on_active(token).response.decision == true
+}
+
+test_exp_equal_to_valid_until_allows if {
+	_claims.valid_until == time.format(_claims.exp * 1000000000)
+	_on_active(_token).response.decision == true
+}
+
+test_exp_one_second_before_valid_until_allows if {
+	token := _sign(_header, object.union(_claims, {"valid_until": time.format((_claims.exp + 1) * 1000000000)}))
+	_on_active(token).response.decision == true
+}
+
+test_exp_after_valid_until_denies_context_invalid if {
+	token := _sign(_header, object.union(_claims, {"valid_until": time.format((_claims.exp - 1) * 1000000000)}))
+	c := _on_active(token).consent
+	c.invalid_code == "CONSENT_CONTEXT_INVALID"
+	contains(c.invalid_reason, "exp is after valid_until")
+}
+
+test_valid_until_not_rfc3339_denies_context_invalid if {
+	_denies_context_invalid(_header, object.union(_claims, {"valid_until": "2030-01-01"}))
 }
 
 _with_encrypted_subject(value) := object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": value})

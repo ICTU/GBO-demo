@@ -239,6 +239,9 @@ Het token bevat de bindings waarop de PDP later beslist:
 - scopes en optionele veldselecties;
 - `dienstverlener_oin`;
 - issuer, audience en geldigheid via `iat`, `nbf`, `exp` en `valid_until`.
+  `valid_until` is het einde van de toestemming; `exp` mag daarvóór liggen
+  (een kortlevend proof), maar niet erna. De PDP weigert een proof met `exp`
+  na `valid_until` met `CONSENT_CONTEXT_INVALID`.
 
 De bestaande API-veldnaam `dienstverlener_oin` bevat in deze flow de FSC Peer
 ID waarmee de PDP de token aan `subject.id` bindt, of, als een integrator
