@@ -635,6 +635,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **Consent requires the citizen to confirm having read the information**
+  (#598). The consent screen of the toestemmingsportaal has a checkbox "Ik heb
+  gelezen wie mijn gegevens opvraagt, met welk doel, welke gegevens dat zijn
+  en tot wanneer de toestemming geldt."; "Geef toestemming" stays disabled
+  until it is ticked, and is disabled again when it is unticked. A grant
+  carries `"information_confirmed": true`. The consent portal backend refuses
+  a grant without it, on `POST /portal/requests/{request_uri}/decision` and on
+  the direct `POST /portal/consents`, with `400` and reason
+  `CONFIRMATION_MISSING`, before anything else: no consent record, no BSNk
+  call and no logbook record, and the request reference stays usable. A
+  refusal needs no confirmation. The developer portal sends the confirmation
+  on the citizen's behalf (demo shortcut).
 - **The safety audit runs in CI** (`safety` job, `make check-safety`) and
   scans every tracked file. It now flags OINs with a real register prefix;
   test data uses demo OINs (`99999999…`) instead.

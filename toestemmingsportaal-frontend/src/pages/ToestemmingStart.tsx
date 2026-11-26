@@ -107,7 +107,7 @@ export default function ToestemmingStart() {
         <ToestemmingConsent
           request={phase.request}
           deciding={phase.kind === 'deciding'}
-          onGrant={(scopes) => decide({ decision: 'grant', scopes })}
+          onGrant={(scopes) => decide({ decision: 'grant', scopes, information_confirmed: true })}
           onDeny={() => decide({ decision: 'deny' })}
         />
       )

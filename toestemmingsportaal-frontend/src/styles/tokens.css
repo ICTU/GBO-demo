@@ -554,6 +554,27 @@ a:focus-visible, button:focus-visible, input:focus-visible {
   transform: rotate(45deg);
 }
 
+/* ---------- Confirmation that the information was read ---------- */
+.confirm-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 24px;
+  padding: 16px 20px;
+  background: #fff;
+  border: 1px solid var(--rule);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--ink-900);
+}
+.confirm-card:hover { border-color: var(--lint); }
+.confirm-hint {
+  margin: 10px 0 0;
+  font-size: 13.5px;
+  color: var(--ink-700);
+}
+
 /* ---------- Partial warning ---------- */
 .partial-warning {
   background: var(--warn-bg);

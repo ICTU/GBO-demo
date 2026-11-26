@@ -3,7 +3,7 @@ import MijnOverheidLayout from '../components/MijnOverheidLayout'
 import ScopeToggle from '../components/consent/ScopeToggle'
 import PartialConsentWarning from '../components/consent/PartialConsentWarning'
 import { requestedScopeGroups } from '../data/scopeGroups'
-import { chosenScopes, type ConsentRequest } from '../consentStart/startFlow'
+import { canGrant, chosenScopes, type ConsentRequest } from '../consentStart/startFlow'
 
 function formatValidUntil(iso?: string): string {
   if (!iso) return '3 maanden na toestemming'
@@ -22,14 +22,19 @@ type Props = {
 // The consent screen of a resolved request. Name, purpose and data sets come
 // from the backend, which takes name and purpose from the provider's
 // registration. The citizen grants or refuses; there is no way back without
-// a decision, because the portal does not know the return URL.
+// a decision, because the portal does not know the return URL. Consent must
+// be informed: "Geef toestemming" stays disabled until the citizen confirms
+// having seen who asks, the purpose, the data and the validity, and onGrant
+// is only reachable after that confirmation.
 export default function ToestemmingConsent({ request, deciding, onGrant, onDeny }: Props) {
   const scopeGroups = useMemo(() => requestedScopeGroups(request.scopes).groups, [request])
   const [picked, setPicked] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(scopeGroups.map((s) => [s.code, true])),
   )
+  const [informationConfirmed, setInformationConfirmed] = useState(false)
   const chosen = chosenScopes(request.scopes, picked)
   const partial = chosen.length > 0 && chosen.length < scopeGroups.length
+  const grantable = canGrant(chosen, informationConfirmed, deciding)
 
   return (
     <MijnOverheidLayout
@@ -78,11 +83,26 @@ export default function ToestemmingConsent({ request, deciding, onGrant, onDeny 
           </div>
         )}
 
+        <label className="confirm-card">
+          <input
+            type="checkbox"
+            className="gov-check"
+            checked={informationConfirmed}
+            onChange={(e) => setInformationConfirmed(e.target.checked)}
+            disabled={deciding}
+          />
+          <span>
+            Ik heb gelezen wie mijn gegevens opvraagt, met welk doel, welke gegevens dat zijn en tot wanneer
+            de toestemming geldt.
+          </span>
+        </label>
+
         <div className="actions">
           <button
             className="btn btn-primary"
-            onClick={() => onGrant(chosen)}
-            disabled={deciding || chosen.length === 0}
+            onClick={() => grantable && onGrant(chosen)}
+            disabled={!grantable}
+            aria-describedby={informationConfirmed ? undefined : 'confirm-hint'}
           >
             {deciding ? 'Bezig…' : 'Geef toestemming'}
           </button>
@@ -93,6 +113,11 @@ export default function ToestemmingConsent({ request, deciding, onGrant, onDeny 
             {chosen.length} van {scopeGroups.length} onderdelen geselecteerd
           </span>
         </div>
+        {!informationConfirmed && (
+          <p id="confirm-hint" className="confirm-hint">
+            Bevestig eerst dat u de informatie hebt gelezen. Daarna kunt u toestemming geven.
+          </p>
+        )}
       </div>
     </MijnOverheidLayout>
   )

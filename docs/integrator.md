@@ -180,7 +180,7 @@ login=$(curl -sS -X POST localhost:9405/portal/login \
   -H 'Content-Type: application/json' -d '{"citizen_bsn":"123456789"}' | jq -r .token)
 token=$(curl -sS -X POST localhost:9405/portal/consents \
   -H "Authorization: Bearer $login" -H 'Content-Type: application/json' \
-  -d '{"dienstverlener_oin":"99999999900000000300","scopes":["bd:ib:2025"],"validity_seconds":3600}' \
+  -d '{"dienstverlener_oin":"99999999900000000300","scopes":["bd:ib:2025"],"validity_seconds":3600,"information_confirmed":true}' \
   | jq -r .consent_token)
 curl -sS -X POST localhost:9423/api/dvtp/query \
   -H 'Content-Type: application/json' \

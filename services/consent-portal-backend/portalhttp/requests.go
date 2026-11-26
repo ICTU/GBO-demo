@@ -37,6 +37,9 @@ type ConsentRequestResponse struct {
 type DecisionRequest struct {
 	Decision string   `json:"decision"`
 	Scopes   []string `json:"scopes"`
+	// InformationConfirmed is true when the citizen confirmed seeing who
+	// asks, the purpose, the data and the validity. A grant requires it.
+	InformationConfirmed bool `json:"information_confirmed"`
 }
 
 // DecisionResponse says how the decision ended and where the browser goes.
@@ -83,8 +86,9 @@ func handleDecision(p *consent.Portal) http.HandlerFunc {
 			}
 
 			decided, err := p.Decide(ctx, citizen, r.PathValue("ref"), consent.Decision{
-				Grant:  req.Decision == "grant",
-				Scopes: req.Scopes,
+				Grant:                req.Decision == "grant",
+				Scopes:               req.Scopes,
+				InformationConfirmed: req.InformationConfirmed,
 			})
 			if errors.Is(err, consent.ErrInvalidDecision) {
 				return nil, &httpError{Status: http.StatusBadRequest, Body: map[string]any{"error": err.Error()}}

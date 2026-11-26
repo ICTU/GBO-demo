@@ -69,6 +69,9 @@ type GiveConsentRequest struct {
 	ScopeEntries     []consent.ScopeEntry `json:"scope_entries"`
 	ValiditySeconds  int                  `json:"validity_seconds,omitempty"`
 	UseCase          string               `json:"use_case,omitempty"`
+	// InformationConfirmed is true when the citizen confirmed seeing who
+	// asks, the purpose, the data and the validity. Required.
+	InformationConfirmed bool `json:"information_confirmed"`
 }
 
 type GiveConsentResponse struct {
@@ -231,15 +234,20 @@ func handleGiveConsent(p *consent.Portal) http.HandlerFunc {
 				}
 			}
 			in := consent.GiveInput{
-				DienstverlenerOIN: req.DienstverlenrOIN,
-				Scopes:            req.Scopes,
-				ScopeEntries:      req.ScopeEntries,
-				ValiditySeconds:   req.ValiditySeconds,
-				UseCase:           req.UseCase,
-				Trigger:           r.Header.Get("X-Demo-Source"),
+				DienstverlenerOIN:    req.DienstverlenrOIN,
+				Scopes:               req.Scopes,
+				ScopeEntries:         req.ScopeEntries,
+				ValiditySeconds:      req.ValiditySeconds,
+				UseCase:              req.UseCase,
+				Trigger:              r.Header.Get("X-Demo-Source"),
+				InformationConfirmed: req.InformationConfirmed,
 			}
 
 			granted, err := p.GiveConsent(ctx, citizen, in)
+			var refusal *consent.Refusal
+			if errors.As(err, &refusal) {
+				return nil, referenceError(ctx, err)
+			}
 			if err != nil {
 				logctx.From(ctx).Error("give consent failed", "err", err.Error())
 				return nil, &httpError{

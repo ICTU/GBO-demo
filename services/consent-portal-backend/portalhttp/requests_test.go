@@ -201,7 +201,7 @@ func decode(t *testing.T, raw []byte) map[string]any {
 	return body
 }
 
-var grantBoth = map[string]any{"decision": "grant", "scopes": []string{"bd:ib:2025", "bd:ib:2024"}}
+var grantBoth = map[string]any{"decision": "grant", "scopes": []string{"bd:ib:2025", "bd:ib:2024"}, "information_confirmed": true}
 
 // ── Resolve ───────────────────────────────────────────────────────────────
 
@@ -379,10 +379,10 @@ func TestDecisionRefusesABadBodyAndKeepsTheReference(t *testing.T) {
 	for name, body := range map[string]any{
 		"no body":                   nil,
 		"other decision":            map[string]any{"decision": "maybe"},
-		"grant without data sets":   map[string]any{"decision": "grant"},
-		"grant of empty data sets":  map[string]any{"decision": "grant", "scopes": []string{}},
-		"grant beyond the request":  map[string]any{"decision": "grant", "scopes": []string{"bd:ib:2025", "lvg:vbo:eigendom"}},
-		"grant of a data set twice": map[string]any{"decision": "grant", "scopes": []string{"bd:ib:2025", "bd:ib:2025"}},
+		"grant without data sets":   map[string]any{"decision": "grant", "information_confirmed": true},
+		"grant of empty data sets":  map[string]any{"decision": "grant", "scopes": []string{}, "information_confirmed": true},
+		"grant beyond the request":  map[string]any{"decision": "grant", "scopes": []string{"bd:ib:2025", "lvg:vbo:eigendom"}, "information_confirmed": true},
+		"grant of a data set twice": map[string]any{"decision": "grant", "scopes": []string{"bd:ib:2025", "bd:ib:2025"}, "information_confirmed": true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, returnURL)

@@ -120,6 +120,16 @@ export function chosenScopes(requested: string[], picked: Record<string, boolean
   return requestedScopeGroups(requested).groups.filter((s) => picked[s.code] ?? true).map((s) => s.code)
 }
 
+/**
+ * Whether "Geef toestemming" can be pressed: at least one data set is
+ * chosen, the citizen confirmed having seen who asks, the purpose, the data
+ * and the validity, and no decision is under way. Consent must be informed,
+ * and the backend refuses a grant without the confirmation.
+ */
+export function canGrant(chosen: string[], informationConfirmed: boolean, deciding: boolean): boolean {
+  return chosen.length > 0 && informationConfirmed && !deciding
+}
+
 /** A resolved reference, as GET /portal/requests/{request_uri} returns it. */
 export type ConsentRequest = {
   client_id: string
