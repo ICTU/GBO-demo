@@ -7,8 +7,7 @@ Thanks for taking the time to look at this reference-architecture demo. Bug repo
 Please use GitHub Issues for bug reports and feature discussions, with the bug report or feature request template. Describe:
 
 - Current and wanted behaviour, in terms of behaviour and contracts (API responses, flow steps, UI results), not file paths
-- Acceptance criteria that can each be checked on their own
-- What is out of scope
+- Acceptance criteria that can each be checked on their own, and what is out of scope (for bugs: if you know them)
 - For bugs: how to reproduce it and your environment (OS, Docker version)
 
 For security issues, see [SECURITY.md](SECURITY.md) — please do **not** open a public issue.
@@ -38,7 +37,11 @@ Before opening a PR:
 
 3. Match the code style of the file you're editing. New Go services get the same `.golangci.yml` treatment as existing ones.
 
-4. Fill in the PR template: the problem, the solution, evidence (before and after: a screenshot or real output), the merge danger (how easy to revert, what else can break) and the related GBO-TO IDs (or "none"). Diagrams can go in a ```` ```mermaid ```` block (GitHub and GitLab render it). With gh 2.105 or newer, attach screenshots from the command line: `gh pr create --attach './after.png#After'` (also `gh pr edit` and `gh pr comment`); a `![After](./after.png)` in the body is rewritten to the uploaded image.
+4. Fill in the PR template (`.github/pull_request_template.md`). Evidence means real
+   output or a screenshot, before and after, not a description of it.
+   Diagrams can go in a ```` ```mermaid ```` block. With gh 2.105 or newer you can
+   attach a screenshot from the command line:
+   `gh pr create --attach './after.png#After'` (also works with `gh pr edit`).
 
 ## Scope
 

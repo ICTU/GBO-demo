@@ -17,13 +17,13 @@ labels: bug
 1. `make demo` (or a specific target / curl / UI action)
 2. …
 
-## Acceptance criteria
+## Acceptance criteria (optional; maintainers complete this when triaging)
 
 <!-- Each one checkable on its own. Describe behaviour, not file paths. -->
 
 - [ ] …
 
-## Out of scope
+## Out of scope (optional)
 
 <!-- What this issue does not cover. -->
 

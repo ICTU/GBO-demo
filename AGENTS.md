@@ -35,3 +35,9 @@ before creating or restructuring a service.
 
 Before debugging the EUDI wallet flow (a QR scan that does not produce a
 credential), read [docs/debugging-eudi-wallet.md](docs/debugging-eudi-wallet.md).
+
+# Pull requests and issues
+
+Write PR descriptions with the sections of `.github/pull_request_template.md`,
+also when you pass the body on the command line (`gh pr create --body`).
+Issues follow `.github/ISSUE_TEMPLATE/`.
