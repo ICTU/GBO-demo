@@ -56,30 +56,29 @@ flowchart LR
 ```
 
 Het consent-token noemt de burger alleen in versleutelde waarden per bron: een
-pseudoniem voor elke bron en een identiteit voor een bron op de
-Autorisatielijst BSN. BSNk maakt ze voor het OIN van die bron, en alleen die
-bron kan ze ontsleutelen. De dienstverlener krijgt geen identificator van de
-burger. Het consent-register bewaart die waarden niet; ze worden tijdens het
-aanmaken van het token kortstondig verwerkt. Voor burgergerichte listing en
-ownership gebruikt het register een afzonderlijke, portaalgebonden
-`subject_ref`.
+pseudoniem voor elke bron en een identiteit voor een bron op de Autorisatielijst
+BSN. BSNk maakt ze voor het OIN van die bron, en alleen die bron kan ze
+ontsleutelen. De dienstverlener krijgt geen identificator van de burger. Het
+consent-register bewaart die waarden niet; ze worden tijdens het aanmaken van
+het token kortstondig verwerkt. Voor burgergerichte listing en ownership
+gebruikt het register een afzonderlijke, portaalgebonden `subject_ref`.
 
 Die `subject_ref` leidt het portaal zelf af: een HMAC van het BSN met een
 geheime sleutel van het portaal (`SUBJECT_REF_KEY`). Hetzelfde BSN geeft altijd
 dezelfde verwijzing, dus het portaal vindt een burger bij elke inlog terug
-zonder BSNk. Onder die verwijzing bewaart het register ook de polymorfe
-waarden uit de eerste activering. Het portaal activeert een burger dus één
-keer, bij de eerste toestemming; bij elke volgende toestemming laat het die
-waarden alleen nog transformeren. Bekijken en intrekken roepen BSNk niet aan.
+zonder BSNk. Onder die verwijzing bewaart het register ook de polymorfe waarden
+uit de eerste activering. Het portaal activeert een burger dus één keer, bij de
+eerste toestemming; bij elke volgende toestemming laat het die waarden alleen
+nog transformeren. Bekijken en intrekken roepen BSNk niet aan.
 
 ## 1. Toestemming verlenen
 
-De dienstverlener stuurt zijn verzoek niet via de browser maar server-side,
-als pushed authorization request (PAR, RFC 9126) via FSC. De browser
-draagt alleen het `client_id` en een kortlevende referentie (`request_uri`)
-naar het portaal, en daarna een eenmalige code terug. De dienstverlener
-wisselt die code via FSC in voor het consent-token, met zijn PKCE-verifier
-(RFC 7636). Het token staat nooit in een URL of in browser storage.
+De dienstverlener stuurt zijn verzoek niet via de browser maar server-side, als
+pushed authorization request (PAR, RFC 9126) via FSC. De browser draagt alleen
+het `client_id` en een kortlevende referentie (`request_uri`) naar het portaal,
+en daarna een eenmalige code terug. De dienstverlener wisselt die code via FSC
+in voor het consent-token, met zijn PKCE-verifier (RFC 7636). Het token staat
+nooit in een URL of in browser storage.
 
 ```mermaid
 sequenceDiagram
@@ -136,76 +135,76 @@ sequenceDiagram
 De pseudonimisering is ongewijzigd: bij de eerste toestemming van een burger
 activeert het portaal het BSN bij BSNk en bewaart het register de polymorfe
 waarden onder `subject_ref`; bij elke toestemming leest het portaal de
-Autorisatielijst BSN (hooguit eens per `BSN_AUTHORISATION_LIST_MAX_AGE`) en
-laat het de waarden per bron transformeren. Het register bewaart het consent
-zonder die waarden en ondertekent het token met ES256.
+Autorisatielijst BSN (hooguit eens per `BSN_AUTHORISATION_LIST_MAX_AGE`) en laat
+het de waarden per bron transformeren. Het register bewaart het consent zonder
+die waarden en ondertekent het token met ES256.
 
-Dit wijkt af van figuur 4 van het Globaal Ontwerp, waar de dienstverlener
-scope en doelbinding in de redirect meegeeft en de toestemmingsvoorziening
-het consent-id en de versleutelde waarden via een redirect terugstuurt: in de
-demo gaat het verzoek server-side via FSC en gaat alleen een eenmalige code
-door de browser.
+Dit wijkt af van figuur 4 van het Globaal Ontwerp, waar de dienstverlener scope
+en doelbinding in de redirect meegeeft en de toestemmingsvoorziening het
+consent-id en de versleutelde waarden via een redirect terugstuurt: in de demo
+gaat het verzoek server-side via FSC en gaat alleen een eenmalige code door de
+browser.
 
 ### Weigeringen en uitkomsten
 
-Het portaal controleert het verzoek bij PAR tegen de registratie van de
-provider in het toelatingsregister, in deze volgorde. Een geweigerd verzoek
-bereikt de burger niet.
+Het portaal controleert het verzoek bij PAR tegen de registratie van de provider
+in het toelatingsregister, in deze volgorde. Een geweigerd verzoek bereikt de
+burger niet.
 
-| Moment | HTTP | `error` | `reason` | Wanneer |
-| --- | --- | --- | --- | --- |
-| PAR | 401 | `invalid_client` | | Geen `Fsc-Authorization` |
-| PAR | 413 | `invalid_request` | `INITIATION_INCOMPLETE` | De body is groter dan 64 KiB |
-| PAR | 400 | `invalid_request` | `INITIATION_INCOMPLETE` | De body is niet `application/x-www-form-urlencoded`, een parameter komt meer dan eens voor, of de body bevat een `request_uri` |
-| PAR | 400 | `invalid_request` | `INITIATION_INCOMPLETE` | Verplicht veld ontbreekt (`response_type=code`, `client_id`, `service`, `scope`, `redirect_uri`, `state`, `code_challenge` met `S256`), of `valid_until` is ongeldig |
-| PAR | 503 | `temporarily_unavailable` | `ADMISSION_REGISTER_UNAVAILABLE` | Het toelatingsregister is niet bereikbaar (fail closed) |
-| PAR | 400 | `unauthorized_client` | `PARTY_NOT_ACTIVE` | De peer is niet toegelaten of niet actief |
-| PAR | 400 | `invalid_request` | `INITIATION_MISMATCH` | `client_id` is niet de FSC peer die pusht, de service is niet bij de provider geregistreerd, of `client_name` of `purpose` wijkt af van de registratie |
-| PAR | 400 | `invalid_scope` | `UNKNOWN_SCOPE` | Een onbekende data set |
-| PAR | 400 | `invalid_request` | `RETURN_URL_NOT_REGISTERED` | `redirect_uri` is geen geregistreerde return location (exacte vergelijking) |
-| PAR | 500 | `server_error` | | Interne fout: het verzoek kan niet worden bewaard |
-| Resolve, beslissing | 401 | | | Geen of ongeldig portaaltoken van de burger |
-| Beslissing | 400 | | | De body is geen `{"decision": "grant" of "deny", "scopes": [...]}` |
-| Beslissing | 400 | | | Een `grant` zonder data sets, met een lege data set of met een data set die dubbel genoemd wordt; de referentie blijft bruikbaar |
-| Resolve, beslissing | 404 | | `REQUEST_URI_UNKNOWN` | Onbekende referentie |
-| Resolve, beslissing | 410 | | `REQUEST_URI_EXPIRED` | Verlopen referentie (`PAR_REQUEST_LIFETIME`, standaard 10 minuten) |
-| Resolve, beslissing | 410 | | `REQUEST_URI_SPENT` | Referentie al gebruikt voor een beslissing |
-| Resolve | 400 | | `CLIENT_ID_MISMATCH` | `client_id` in de URL is niet de provider die de referentie pushte |
-| Resolve, beslissing | 403 | | `REQUEST_URI_OTHER_CITIZEN` | Referentie is al aan een andere burger gebonden |
-| Beslissing | 403 | | `REQUEST_URI_NOT_RESOLVED` | Beslissing zonder voorafgaande resolve |
-| Beslissing | 400 | | | Een `grant` met een data set die niet gevraagd is; de referentie blijft bruikbaar |
-| Resolve, beslissing | 502 | | | Interne fout, zoals een ontbrekende opslag van verzoeken of een subject reference die niet af te leiden is |
-| `/token` | 401 | `invalid_client` | | Geen `Fsc-Authorization` |
-| `/token` | 413 | `invalid_request` | | De body is groter dan 64 KiB |
-| `/token` | 400 | `invalid_request` | | De body is niet `application/x-www-form-urlencoded`, een parameter komt meer dan eens voor, `grant_type`, `code` of `redirect_uri` ontbreekt, of `client_id` is niet de FSC peer die aanroept |
-| `/token` | 400 | `unsupported_grant_type` | | Een andere `grant_type` dan `authorization_code` |
-| `/token` | 400 | `invalid_grant` | | Code onbekend, al ingewisseld, ouder dan 60 seconden, van een andere provider, met een andere `redirect_uri` dan in het verzoek, of met een verkeerde `code_verifier` |
-| `/token` | 500 | `server_error` | | Interne fout, zoals een ontbrekende opslag van codes |
+| Moment              | HTTP | `error`                   | `reason`                         | Wanneer                                                                                                                                                                                       |
+| ------------------- | ---- | ------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PAR                 | 401  | `invalid_client`          |                                  | Geen `Fsc-Authorization`                                                                                                                                                                      |
+| PAR                 | 413  | `invalid_request`         | `INITIATION_INCOMPLETE`          | De body is groter dan 64 KiB                                                                                                                                                                  |
+| PAR                 | 400  | `invalid_request`         | `INITIATION_INCOMPLETE`          | De body is niet `application/x-www-form-urlencoded`, een parameter komt meer dan eens voor, of de body bevat een `request_uri`                                                                |
+| PAR                 | 400  | `invalid_request`         | `INITIATION_INCOMPLETE`          | Verplicht veld ontbreekt (`response_type=code`, `client_id`, `service`, `scope`, `redirect_uri`, `state`, `code_challenge` met `S256`), of `valid_until` is ongeldig                          |
+| PAR                 | 503  | `temporarily_unavailable` | `ADMISSION_REGISTER_UNAVAILABLE` | Het toelatingsregister is niet bereikbaar (fail closed)                                                                                                                                       |
+| PAR                 | 400  | `unauthorized_client`     | `PARTY_NOT_ACTIVE`               | De peer is niet toegelaten of niet actief                                                                                                                                                     |
+| PAR                 | 400  | `invalid_request`         | `INITIATION_MISMATCH`            | `client_id` is niet de FSC peer die pusht, de service is niet bij de provider geregistreerd, of `client_name` of `purpose` wijkt af van de registratie                                        |
+| PAR                 | 400  | `invalid_scope`           | `UNKNOWN_SCOPE`                  | Een onbekende data set                                                                                                                                                                        |
+| PAR                 | 400  | `invalid_request`         | `RETURN_URL_NOT_REGISTERED`      | `redirect_uri` is geen geregistreerde return location (exacte vergelijking)                                                                                                                   |
+| PAR                 | 500  | `server_error`            |                                  | Interne fout: het verzoek kan niet worden bewaard                                                                                                                                             |
+| Resolve, beslissing | 401  |                           |                                  | Geen of ongeldig portaaltoken van de burger                                                                                                                                                   |
+| Beslissing          | 400  |                           |                                  | De body is geen `{"decision": "grant" of "deny", "scopes": [...]}`                                                                                                                            |
+| Beslissing          | 400  |                           |                                  | Een `grant` zonder data sets, met een lege data set of met een data set die dubbel genoemd wordt; de referentie blijft bruikbaar                                                              |
+| Resolve, beslissing | 404  |                           | `REQUEST_URI_UNKNOWN`            | Onbekende referentie                                                                                                                                                                          |
+| Resolve, beslissing | 410  |                           | `REQUEST_URI_EXPIRED`            | Verlopen referentie (`PAR_REQUEST_LIFETIME`, standaard 10 minuten)                                                                                                                            |
+| Resolve, beslissing | 410  |                           | `REQUEST_URI_SPENT`              | Referentie al gebruikt voor een beslissing                                                                                                                                                    |
+| Resolve             | 400  |                           | `CLIENT_ID_MISMATCH`             | `client_id` in de URL is niet de provider die de referentie pushte                                                                                                                            |
+| Resolve, beslissing | 403  |                           | `REQUEST_URI_OTHER_CITIZEN`      | Referentie is al aan een andere burger gebonden                                                                                                                                               |
+| Beslissing          | 403  |                           | `REQUEST_URI_NOT_RESOLVED`       | Beslissing zonder voorafgaande resolve                                                                                                                                                        |
+| Beslissing          | 400  |                           |                                  | Een `grant` met een data set die niet gevraagd is; de referentie blijft bruikbaar                                                                                                             |
+| Resolve, beslissing | 502  |                           |                                  | Interne fout, zoals een ontbrekende opslag van verzoeken of een subject reference die niet af te leiden is                                                                                    |
+| `/token`            | 401  | `invalid_client`          |                                  | Geen `Fsc-Authorization`                                                                                                                                                                      |
+| `/token`            | 413  | `invalid_request`         |                                  | De body is groter dan 64 KiB                                                                                                                                                                  |
+| `/token`            | 400  | `invalid_request`         |                                  | De body is niet `application/x-www-form-urlencoded`, een parameter komt meer dan eens voor, `grant_type`, `code` of `redirect_uri` ontbreekt, of `client_id` is niet de FSC peer die aanroept |
+| `/token`            | 400  | `unsupported_grant_type`  |                                  | Een andere `grant_type` dan `authorization_code`                                                                                                                                              |
+| `/token`            | 400  | `invalid_grant`           |                                  | Code onbekend, al ingewisseld, ouder dan 60 seconden, van een andere provider, met een andere `redirect_uri` dan in het verzoek, of met een verkeerde `code_verifier`                         |
+| `/token`            | 500  | `server_error`            |                                  | Interne fout, zoals een ontbrekende opslag van codes                                                                                                                                          |
 
-Bij een geweigerde referentie toont het portaal één foutpagina, zonder link
-en zonder redirect. Na een beslissing gaat de burger naar de geregistreerde
-return location:
+Bij een geweigerde referentie toont het portaal één foutpagina, zonder link en
+zonder redirect. Na een beslissing gaat de burger naar de geregistreerde return
+location:
 
-| Beslissing | Return-URL | Uitkomst bij de provider |
-| --- | --- | --- |
-| Toestemming | `?code=…&state=…` | `granted`; het token staat in de sessie van de provider-backend |
-| Geweigerd | `?error=access_denied&state=…` | `denied`; geen consent |
-| Consent maken mislukt | `?error=server_error&state=…` | `failed` |
+| Beslissing            | Return-URL                     | Uitkomst bij de provider                                        |
+| --------------------- | ------------------------------ | --------------------------------------------------------------- |
+| Toestemming           | `?code=…&state=…`              | `granted`; het token staat in de sessie van de provider-backend |
+| Geweigerd             | `?error=access_denied&state=…` | `denied`; geen consent                                          |
+| Consent maken mislukt | `?error=server_error&state=…`  | `failed`                                                        |
 
 ### Demo shortcuts
 
 - De registratie van providers (services, doel, return locations) staat in de
-  config van het toelatingsregister, niet in zijn database. Een echte
-  uitrol beheert die in het register of een dienstencatalogus.
+  config van het toelatingsregister, niet in zijn database. Een echte uitrol
+  beheert die in het register of een dienstencatalogus.
 - consent-portal-backend leest het toelatingsregister rechtstreeks over het
   Docker-netwerk `dvtp-onboarding`, zonder eigen read-listener of mTLS.
-- Request store en code store zijn in-memory, met één replica: een herstart
-  laat open verzoeken en codes vervallen.
+- Request store en code store zijn in-memory, met één replica: een herstart laat
+  open verzoeken en codes vervallen.
 - De FSC-listener van het portaal (`/par`, `/token`) vertrouwt
   `Fsc-Authorization` zonder de handtekening te verifiëren, en is net als
-  `consent-status` ook zonder `cr-inway` bereikbaar op de netwerken
-  `fsc-infra` en `backend`. Een echte uitrol verifieert het token of zet
-  mTLS tussen Inway en service.
+  `consent-status` ook zonder `cr-inway` bereikbaar op de netwerken `fsc-infra`
+  en `backend`. Een echte uitrol verifieert het token of zet mTLS tussen Inway
+  en service.
 - De bekende data sets zijn backend-config naast de teksten van de portal.
 - De portal-login (mock-DigiD) is een bearer-token in `sessionStorage`; een
   echte uitrol houdt de sessie van de burger server-side achter een
@@ -214,20 +213,19 @@ return location:
   die tussen PAR en beslissing wordt gedeactiveerd, krijgt binnen de looptijd
   van het verzoek nog een consent.
 - De sessies van de provider-backends zijn in-memory. In de demo draaien alle
-  frontends op één host, dus de browser stuurt de sessiecookie van elke
-  provider naar de `/api`-proxy van elke frontend; een echte uitrol geeft
-  elke provider een eigen origin.
-- De directe `POST /portal/consents` blijft bestaan als developer-API (token
-  in het antwoord, doel uit het verzoek); het developer portal en de
-  integrator gebruiken die. Die API slaat de toelatingscontroles van het
-  pushed request over: ook een inactieve of niet-geregistreerde
-  dienstverlener krijgt er een consent mee, en wie een portal-login heeft,
-  kan er via de `/portal-api`-proxy van het portaal een token voor elke
-  `dienstverlener_oin` mee laten maken. Het developer portal bewaart de
-  tokens die het zo krijgt in `sessionStorage`. De belofte hierboven dat het
-  token nooit in een URL of in browser storage staat, geldt dus voor de
-  stroom van de dienstverlener, niet voor deze API. Een echte uitrol heeft
-  zo'n endpoint niet voor tokens van burgers, of beperkt het tot de
+  frontends op één host, dus de browser stuurt de sessiecookie van elke provider
+  naar de `/api`-proxy van elke frontend; een echte uitrol geeft elke provider
+  een eigen origin.
+- De directe `POST /portal/consents` blijft bestaan als developer-API (token in
+  het antwoord, doel uit het verzoek); het developer portal en de integrator
+  gebruiken die. Die API slaat de toelatingscontroles van het pushed request
+  over: ook een inactieve of niet-geregistreerde dienstverlener krijgt er een
+  consent mee, en wie een portal-login heeft, kan er via de `/portal-api`-proxy
+  van het portaal een token voor elke `dienstverlener_oin` mee laten maken. Het
+  developer portal bewaart de tokens die het zo krijgt in `sessionStorage`. De
+  belofte hierboven dat het token nooit in een URL of in browser storage staat,
+  geldt dus voor de stroom van de dienstverlener, niet voor deze API. Een echte
+  uitrol heeft zo'n endpoint niet voor tokens van burgers, of beperkt het tot de
   ontwikkelomgeving.
 
 Het token bevat de bindings waarop de PDP later beslist:
@@ -240,9 +238,9 @@ Het token bevat de bindings waarop de PDP later beslist:
 - `dienstverlener_oin`;
 - issuer, audience en geldigheid via `iat`, `nbf`, `exp` en `valid_until`.
 
-De bestaande API-veldnaam `dienstverlener_oin` bevat in deze flow de FSC Peer
-ID waarmee de PDP de token aan `subject.id` bindt, of, als een integrator
-namens de dienstverlener verbindt, aan de delegator uit de FSC-verbinding (zie
+De bestaande API-veldnaam `dienstverlener_oin` bevat in deze flow de FSC Peer ID
+waarmee de PDP de token aan `subject.id` bindt, of, als een integrator namens de
+dienstverlener verbindt, aan de delegator uit de FSC-verbinding (zie
 [Integrator namens een dienstverlener](integrator.md)). De voorgedefinieerde
 issuance-scenario's van het developer portal vullen dit veld vanuit
 `DVTP_CONSUMER_PEER_ID`; alleen lokaal geldt bij ontbrekende configuratie de
@@ -302,18 +300,17 @@ sequenceDiagram
 ```
 
 De policy haalt het consent zelf op, tijdens de evaluatie (`http.send` vanuit
-`policies/gbo/consent.rego`); de mapper verifieert en raadpleegt niets.
-De status vraagt ze over FSC op, via de eigen Outway van de PDP
-(`pdp-outway` → `cr-inway` → `consent-register:4012`), zodat het register
-alleen een peer antwoordt die de Inway heeft geauthenticeerd. De JWKS is
-openbaar en komt rechtstreeks van het register.
-De JWKS wordt vijf minuten gecachet en direct opnieuw opgehaald bij een
-onbekende `kid`. De status van het specifieke consent wordt bij iedere aanvraag
-zonder cache online gecontroleerd, zodat een intrekking bij de eerstvolgende
-aanvraag doorwerkt. JWT-tijdclaims hebben 30 seconden tolerantie voor
-klokverschil. Elke aanroep heeft een timeout van twee seconden; een
-onbereikbaar register levert een expliciete weigering op, geen ongedefinieerde
-regel.
+`policies/gbo/consent.rego`); de mapper verifieert en raadpleegt niets. De
+status vraagt ze over FSC op, via de eigen Outway van de PDP (`pdp-outway` →
+`cr-inway` → `consent-register:4012`), zodat het register alleen een peer
+antwoordt die de Inway heeft geauthenticeerd. De JWKS is openbaar en komt
+rechtstreeks van het register. De JWKS wordt vijf minuten gecachet en direct
+opnieuw opgehaald bij een onbekende `kid`. De status van het specifieke consent
+wordt bij iedere aanvraag zonder cache online gecontroleerd, zodat een
+intrekking bij de eerstvolgende aanvraag doorwerkt. JWT-tijdclaims hebben 30
+seconden tolerantie voor klokverschil. Elke aanroep heeft een timeout van twee
+seconden; een onbereikbaar register levert een expliciete weigering op, geen
+ongedefinieerde regel.
 
 De policy geeft alleen `ALLOW` wanneer alle volgende relaties kloppen:
 
@@ -328,36 +325,35 @@ geldige ondertekening en geregistreerde claims
 ```
 
 De dienstverlener noemt het subject met een plaatshouder en niet met een eigen
-waarde: het subject kan zo alleen de burger van het geverifieerde consent
-zijn. De plaatshouder zegt welke vorm de API van de bron neemt:
-`consent:identity` voor een API die een BSN neemt, `consent:pseudonym` voor
-een API die het eigen pseudoniem van de bron neemt. Elke regel noemt de
-plaatshouders die zijn API accepteert; een andere waarde wordt geweigerd met
-`CONSTRAINT_MISMATCH`. `DVT0001` en `LVG0001` accepteren alleen
-`consent:identity`; geen demobron neemt nog een pseudoniem aan.
+waarde: het subject kan zo alleen de burger van het geverifieerde consent zijn.
+De plaatshouder zegt welke vorm de API van de bron neemt: `consent:identity`
+voor een API die een BSN neemt, `consent:pseudonym` voor een API die het eigen
+pseudoniem van de bron neemt. Elke regel noemt de plaatshouders die zijn API
+accepteert; een andere waarde wordt geweigerd met `CONSTRAINT_MISMATCH`.
+`DVT0001` en `LVG0001` accepteren alleen `consent:identity`; geen demobron neemt
+nog een pseudoniem aan.
 
-Pas na de `ALLOW` zet de sidecar bij de bron het BSN of haar eigen pseudoniem
-op de plek van de plaatshouder. De bron ontsleutelt daarvoor zelf de waarde
-van die vorm die het token voor haar OIN draagt, met sleutels die ze vooraf
-heeft gekregen en zonder BSNk aan te roepen. Als pseudoniem gebruikt de
-sidecar de pseudoniemwaarde (`pseudonymValue`): die blijft gelijk als de bron
-nieuwe sleutels krijgt. Een waarde die voor een andere
-partij is gemaakt, accepteert de bron niet. Een bron die niet op de
-Autorisatielijst BSN staat, heeft alleen een pseudoniem: een vraag naar haar
-identiteit faalt bij de sidecar. Een aanvraag zonder consent-token (de EUDI-route) gaat ongewijzigd
-door.
+Pas na de `ALLOW` zet de sidecar bij de bron het BSN of haar eigen pseudoniem op
+de plek van de plaatshouder. De bron ontsleutelt daarvoor zelf de waarde van die
+vorm die het token voor haar OIN draagt, met sleutels die ze vooraf heeft
+gekregen en zonder BSNk aan te roepen. Als pseudoniem gebruikt de sidecar de
+pseudoniemwaarde (`pseudonymValue`): die blijft gelijk als de bron nieuwe
+sleutels krijgt. Een waarde die voor een andere partij is gemaakt, accepteert de
+bron niet. Een bron die niet op de Autorisatielijst BSN staat, heeft alleen een
+pseudoniem: een vraag naar haar identiteit faalt bij de sidecar. Een aanvraag
+zonder consent-token (de EUDI-route) gaat ongewijzigd door.
 
-Dat de vervanging pas na de beslissing komt, hangt eraan dat alleen de Inway
-de sidecar kan bereiken. In de demo zit de sidecar daarom alleen op een
-netwerk met de Inways van de bronnen (`source-gateways`) en op een netwerk met
-wat de bron bedient (`sources`), en publiceert hij geen poort. Een afnemer die
-de sidecar rechtstreeks zou bereiken, sloeg de PDP over.
+Dat de vervanging pas na de beslissing komt, hangt eraan dat alleen de Inway de
+sidecar kan bereiken. In de demo zit de sidecar daarom alleen op een netwerk met
+de Inways van de bronnen (`source-gateways`) en op een netwerk met wat de bron
+bedient (`sources`), en publiceert hij geen poort. Een afnemer die de sidecar
+rechtstreeks zou bereiken, sloeg de PDP over.
 
 Ontbrekende, ongeldige of niet-beschikbare context faalt gesloten met een
 gerichte reden, zoals `CONSENT_SIGNATURE_INVALID`, `CONSENT_TOKEN_EXPIRED`,
-`CONSENT_CONTEXT_INVALID`, `CONSENT_KEYS_UNAVAILABLE`,
-`CONSENT_ACTOR_MISMATCH`, `INTEGRATOR_NOT_REGISTERED`, `CONSTRAINT_MISMATCH`,
-`CONSENT_STATUS_UNAVAILABLE` of `CONSENT_WITHDRAWN`.
+`CONSENT_CONTEXT_INVALID`, `CONSENT_KEYS_UNAVAILABLE`, `CONSENT_ACTOR_MISMATCH`,
+`INTEGRATOR_NOT_REGISTERED`, `CONSTRAINT_MISMATCH`, `CONSENT_STATUS_UNAVAILABLE`
+of `CONSENT_WITHDRAWN`.
 
 ## 3. Toestemming intrekken
 
@@ -390,13 +386,13 @@ ondertekende token.
 ## 4. Gebruik van een toestemming inzien
 
 Een burger ziet in MijnOverheid wanneer een toestemming is gebruikt: datum,
-dienstverlener en bron (#687). De sidecar bij de bron meldt elke levering
-onder een toestemming bij de gegevensgebruik-index (`data-usage-index`) naast
-het consent-register, en legt haar daarna vast in een eigen
-leveringslogboek, los van het logboek van de bron (#689). Opent de burger
-het consent, dan zoekt het register de registraties op en leest het elke
-trace terug in het leveringslogboek van de bron (#686). Alles tussen
-organisaties loopt over FSC, ook de opvraging van de index door het register.
+dienstverlener en bron (#687). De sidecar bij de bron meldt elke levering onder
+een toestemming bij de gegevensgebruik-index (`data-usage-index`) naast het
+consent-register, en legt haar daarna vast in een eigen leveringslogboek, los
+van het logboek van de bron (#689). Opent de burger het consent, dan zoekt het
+register de registraties op en leest het elke trace terug in het
+leveringslogboek van de bron (#686). Alles tussen organisaties loopt over FSC,
+ook de opvraging van de index door het register.
 
 ```mermaid
 sequenceDiagram
@@ -435,8 +431,8 @@ sequenceDiagram
 
 ### Het contract voor een bron
 
-Een bron die onder een toestemming levert, doet per levering twee dingen
-voordat de gegevens teruggaan, in deze volgorde:
+Een bron die onder een toestemming levert, doet per levering twee dingen voordat
+de gegevens teruggaan, in deze volgorde:
 
 1. De trace melden bij de index, via de Outway van haar eigen FSC-peer:
 
@@ -450,58 +446,56 @@ voordat de gegevens teruggaan, in deze volgorde:
     "grondslag_ref": "<consent_id uit het token>"}
    ```
 
-2. Een leveringsrecord vastleggen in een eigen leveringslogboek, onder
-   dezelfde trace, met de burger als betrokkene en zonder het consent.
+2. Een leveringsrecord vastleggen in een eigen leveringslogboek, onder dezelfde
+   trace, met de burger als betrokkene en zonder het consent.
 
-Lukt een van de twee niet, dan krijgt de afnemer een fout en geen gegevens.
-De registratie gaat voorop: het register telt elk record onder een
-geregistreerde trace als gebruik, dus een record van een levering die
-daarna alsnog is tegengehouden mag niet achterblijven. Een registratie
-zonder record geeft geen gebruik.
+Lukt een van de twee niet, dan krijgt de afnemer een fout en geen gegevens. De
+registratie gaat voorop: het register telt elk record onder een geregistreerde
+trace als gebruik, dus een record van een levering die daarna alsnog is
+tegengehouden mag niet achterblijven. Een registratie zonder record geeft geen
+gebruik.
 
-- `logbook_id` is de Peer ID van de bron, een schuine streep en de naam van
-  de FSC-leesdienst van het leveringslogboek. De naam is nodig omdat BD en
-  LVG een peer delen. De index weigert (403) een registratie voor een andere
-  peer.
+- `logbook_id` is de Peer ID van de bron, een schuine streep en de naam van de
+  FSC-leesdienst van het leveringslogboek. De naam is nodig omdat BD en LVG een
+  peer delen. De index weigert (403) een registratie voor een andere peer.
 - De bron meldt alleen na een `200` op een aanvraag met een consent-token.
 - Een herhaling is veilig: de index antwoordt dan `200`.
-- De bron publiceert de leesfunctie van het leveringslogboek als FSC-dienst
-  met een grant voor het register, en neemt de regel `LDV_READ_FSC` op in
-  haar PDP-policy.
+- De bron publiceert de leesfunctie van het leveringslogboek als FSC-dienst met
+  een grant voor het register, en neemt de regel `LDV_READ_FSC` op in haar
+  PDP-policy.
 
 In de demo doet de sidecar beide stappen (`DATA_USAGE_INDEX_URL`,
-`DATA_USAGE_LOGBOOK_ID`, `DELIVERY_LOGBOOK_URL`, `DELIVERY_ACTIVITY`).
-Zonder die instellingen legt een sidecar geen leveringen vast.
+`DATA_USAGE_LOGBOOK_ID`, `DELIVERY_LOGBOOK_URL`, `DELIVERY_ACTIVITY`). Zonder
+die instellingen legt een sidecar geen leveringen vast.
 
 ### Wat telt als gebruik
 
-Elk record dat het register onder de trace terugleest in het
-leveringslogboek is een gebruik, op de starttijd van dat record. Een
-registratie zonder record geeft geen gebruik. Een registratie waarvan het
-register het logboek niet kan lezen omdat er geen leesdienst voor is
-ingesteld, geeft ook geen gebruik: het register logt een waarschuwing en de
-burger ziet niets.
+Elk record dat het register onder de trace terugleest in het leveringslogboek is
+een gebruik, op de starttijd van dat record. Een registratie zonder record geeft
+geen gebruik. Een registratie waarvan het register het logboek niet kan lezen
+omdat er geen leesdienst voor is ingesteld, geeft ook geen gebruik: het register
+logt een waarschuwing en de burger ziet niets.
 
 Kan het register de index niet bereiken, dan toont de pagina een melding in
-plaats van een lege lijst; kan het één bron niet lezen, dan toont ze een
-melding voor die bron en het gebruik bij de andere bronnen (besluit D2).
-Geeft een bron meer dan 500 records onder één trace, dan toont de pagina dat
-er daar meer gebruik is dan de lijst laat zien.
+plaats van een lege lijst; kan het één bron niet lezen, dan toont ze een melding
+voor die bron en het gebruik bij de andere bronnen (besluit D2). Geeft een bron
+meer dan 500 records onder één trace, dan toont de pagina dat er daar meer
+gebruik is dan de lijst laat zien.
 
 Het register legt het teruglezen vast als eigen verwerking
-(`gbo-toestemming-gebruik-lezen`), met de burger als betrokkene en de namen
-van de gelezen bronnen, zonder de trace-id's.
+(`gbo-toestemming-gebruik-lezen`), met de burger als betrokkene en de namen van
+de gelezen bronnen, zonder de trace-id's.
 
 ### Bekende beperking: één trace onder twee toestemmingen
 
-Het register vindt gebruik per trace, en het leveringsrecord noemt het
-consent niet. Hergebruikt een afnemer één trace-id voor leveringen onder
-twee toestemmingen, dan telt elke levering als gebruik van beide. Een latere
+Het register vindt gebruik per trace, en het leveringsrecord noemt het consent
+niet. Hergebruikt een afnemer één trace-id voor leveringen onder twee
+toestemmingen, dan telt elke levering als gebruik van beide. Een latere
 oplossing kan de span-id aan de registratie toevoegen.
 
 ## Beveiligingsgrens
 
 Het demo-token is een bearer-token. De actorbinding voorkomt dat een andere
-FSC-consument het token gebruikt, maar maakt replay door dezelfde consument
-niet onmogelijk. Een productie-implementatie moet daarom een kortere
-tokenlevensduur en proof-of-possession aan de FSC- of mTLS-identiteit toevoegen.
+FSC-consument het token gebruikt, maar maakt replay door dezelfde consument niet
+onmogelijk. Een productie-implementatie moet daarom een kortere tokenlevensduur
+en proof-of-possession aan de FSC- of mTLS-identiteit toevoegen.

@@ -8,15 +8,15 @@ by anyone. Use it with test BSNs only.
 
 It serves two things.
 
-| Part | Endpoints | Stands in for |
-|---|---|---|
-| BSNk | `/v2/…` | BSNk's own services |
+| Part       | Endpoints                                                   | Stands in for                                |
+| ---------- | ----------------------------------------------------------- | -------------------------------------------- |
+| BSNk       | `/v2/…`                                                     | BSNk's own services                          |
 | Decryption | `/signed-encrypted-identity`, `/signed-encrypted-pseudonym` | The decryption component a party runs itself |
 
 In the demo the consent portal activates a citizen's BSN once, at their first
-consent, and has the result transformed at every consent, through `/v2`: into
-an encrypted pseudonym for every source, and into an encrypted identity for
-each source on the BSN authorisation list. A source reads its value through the
+consent, and has the result transformed at every consent, through `/v2`: into an
+encrypted pseudonym for every source, and into an encrypted identity for each
+source on the BSN authorisation list. A source reads its value through the
 decryption endpoints, on an instance of this image that serves nothing else
 (`DECRYPTION_COMPONENT_ONLY`), so that the source does not call BSNk.
 
@@ -24,23 +24,22 @@ decryption endpoints, on an instance of this image that serves nothing else
 
 BSNk works with four values.
 
-| Value | What it is | Who holds it |
-|---|---|---|
-| PI, polymorphic identity | Leads to the BSN | The party that requested it, and only that party can use it |
-| PP, polymorphic pseudonym | Leads to a pseudonym | The same |
-| VI, encrypted identity | Made for one party, which reads the BSN from it | That party |
-| VP, encrypted pseudonym | Made for one party, which reads its own pseudonym for the citizen from it | That party |
+| Value                     | What it is                                                                | Who holds it                                                |
+| ------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| PI, polymorphic identity  | Leads to the BSN                                                          | The party that requested it, and only that party can use it |
+| PP, polymorphic pseudonym | Leads to a pseudonym                                                      | The same                                                    |
+| VI, encrypted identity    | Made for one party, which reads the BSN from it                           | That party                                                  |
+| VP, encrypted pseudonym   | Made for one party, which reads its own pseudonym for the citizen from it | That party                                                  |
 
-A requester activates a BSN and gets a PI and a PP. For each party that needs
-to know the citizen it then has a VI or a VP made. Each party reads its own
-value itself, with keys it got from BSNk beforehand, and without calling BSNk.
+A requester activates a BSN and gets a PI and a PP. For each party that needs to
+know the citizen it then has a VI or a VP made. Each party reads its own value
+itself, with keys it got from BSNk beforehand, and without calling BSNk.
 
 ## What a value looks like
 
-A value has the fields of the real structure, under the real names. The real
-one is binary and holds three curve points; this one is JSON and holds the BSN
-or the pseudonym in plain sight. The transport form is the base64 of that
-JSON.
+A value has the fields of the real structure, under the real names. The real one
+is binary and holds three curve points; this one is JSON and holds the BSN or
+the pseudonym in plain sight. The transport form is the base64 of that JSON.
 
 A VI for a source, decoded:
 
@@ -73,11 +72,11 @@ A VI for a source, decoded:
 
 Where the mock differs from the real structure:
 
-| Value | Field | Holds |
-|---|---|---|
-| PI, VI | `identityValue` | The BSN |
-| PP | `pseudonymSeed` | A one-way derivative of the BSN, so a PP cannot give the BSN back |
-| VP | `pseudonymValue` | The pseudonym of this citizen at this party |
+| Value  | Field            | Holds                                                             |
+| ------ | ---------------- | ----------------------------------------------------------------- |
+| PI, VI | `identityValue`  | The BSN                                                           |
+| PP     | `pseudonymSeed`  | A one-way derivative of the BSN, so a PP cannot give the BSN back |
+| VP     | `pseudonymValue` | The pseudonym of this citizen at this party                       |
 
 The real structures have `points` in that place. Everything else is as in the
 real one: `recipient` is the OIN the value was made for, and
@@ -151,8 +150,8 @@ Makes a value for each relying party.
 }
 ```
 
-The requester says per party what it gets. `PolymorphicIdentity` is needed
-when a party asks for an identity, `PolymorphicPseudonym` when one asks for a
+The requester says per party what it gets. `PolymorphicIdentity` is needed when
+a party asks for an identity, `PolymorphicPseudonym` when one asks for a
 pseudonym.
 
 A party occurs once in a request. A party that needs both an identity and a
@@ -188,20 +187,20 @@ the party's behalf; `Requester` is the broker.
 }
 ```
 
-The key set version is the date the certificate was issued. The certificate
-must carry the party's OIN as the serial number of its subject.
+The key set version is the date the certificate was issued. The certificate must
+carry the party's OIN as the serial number of its subject.
 
 A test without a certificate leaves it out and names the date itself:
 `POST /v2/provide-dv-keys?key_set_version=20260101`.
 
-A party gets the two keys for a pseudonym, and the key for an identity if it
-may receive the BSN. `ProvideEIDecryptionKey` changes that:
+A party gets the two keys for a pseudonym, and the key for an identity if it may
+receive the BSN. `ProvideEIDecryptionKey` changes that:
 `EI_DECRYPTION_KEY_EXPECTED` refuses the request when the party may not,
 `WITHOUT_EI_DECRYPTION_KEY` leaves the key out.
 
 A key file is a PEM block with the headers of a real key file. A real one is
-labelled `EC PRIVATE KEY`; the mock's is labelled `BSNK MOCK DV KEY`, because
-it holds no key and should not be taken for one:
+labelled `EC PRIVATE KEY`; the mock's is labelled `BSNK MOCK DV KEY`, because it
+holds no key and should not be taken for one:
 
 ```text
 Recipient: 99999999900000000200
@@ -235,9 +234,9 @@ Gives the scheme keys a party needs to verify its values, keyed by URN.
 }
 ```
 
-With the real BSNk these are public keys. Here they are the secret of the
-mock's signature, published like a public key. The signature tells a value the
-mock issued from one that was altered or made up; it protects nothing.
+With the real BSNk these are public keys. Here they are the secret of the mock's
+signature, published like a public key. The signature tells a value the mock
+issued from one that was altered or made up; it protects nothing.
 
 ### Faults
 
@@ -247,19 +246,19 @@ A refused request answers with BSNk's reason.
 { "FaultReason": "ProvisioningRefused", "FaultDescription": "relying party 99999999900000000300 is not authorised to receive the BSN" }
 ```
 
-| `FaultReason` | Status | When |
-|---|---|---|
-| `SyntaxError` | 400 | The request cannot be understood |
-| `InvalidRequest` | 400 | A parameter of a key request is not acceptable |
-| `AuthorizationError` | 403 | The requester may not do this |
-| `ProvisioningRefused` | 403 | The request is understood and BSNk declines it |
+| `FaultReason`         | Status | When                                           |
+| --------------------- | ------ | ---------------------------------------------- |
+| `SyntaxError`         | 400    | The request cannot be understood               |
+| `InvalidRequest`      | 400    | A parameter of a key request is not acceptable |
+| `AuthorizationError`  | 403    | The requester may not do this                  |
+| `ProvisioningRefused` | 403    | The request is understood and BSNk declines it |
 
 ## The decryption endpoints
 
 A party reads its values itself, in a decryption component that it runs, with
-its own keys. These two endpoints take the requests and give the answers of
-that component, at the same paths, so that a caller written against them needs
-no code change to use the real one. That has not been tried against the real
+its own keys. These two endpoints take the requests and give the answers of that
+component, at the same paths, so that a caller written against them needs no
+code change to use the real one. That has not been tried against the real
 component. They are in this image only so that the demo needs one mock instead
 of two. Start it with `DECRYPTION_COMPONENT_ONLY=true` and it serves these two
 endpoints and nothing of BSNk, which is how the demo runs the component of its
@@ -312,26 +311,25 @@ sources.
 }
 ```
 
-`pseudonym` names the key set version as well, so it changes when a party
-gets new keys. `decodedPseudonym.pseudonymValue` does not, so a party that
-keeps its pseudonym of a citizen keeps that value. The source sidecar uses it.
+`pseudonym` names the key set version as well, so it changes when a party gets
+new keys. `decodedPseudonym.pseudonymValue` does not, so a party that keeps its
+pseudonym of a citizen keeps that value. The source sidecar uses it.
 
-`targetClosingKey` is refused: the mock does not convert a pseudonym to
-another closing key.
+`targetClosingKey` is refused: the mock does not convert a pseudonym to another
+closing key.
 
 A failure answers `500` with the reason as plain text, as the real component
 does.
 
 ## The rules the mock enforces
 
-- **A PI or PP is for its requester only.** A transformation is refused when
-  the requester is not the party the PI or PP was issued to.
-- **An identity only for a party that may have the BSN.** Asking for an
-  identity for a party that is not on the list is refused. Such a party can
-  get a pseudonym. A party on the list can get either, or both in two
-  requests.
-- **At most four relying parties per transformation**, each once. If one
-  party cannot be served the whole request fails and nothing is issued.
+- **A PI or PP is for its requester only.** A transformation is refused when the
+  requester is not the party the PI or PP was issued to.
+- **An identity only for a party that may have the BSN.** Asking for an identity
+  for a party that is not on the list is refused. Such a party can get a
+  pseudonym. A party on the list can get either, or both in two requests.
+- **At most four relying parties per transformation**, each once. If one party
+  cannot be served the whole request fails and nothing is issued.
 - **A value is for one party and one key set.** Reading it takes a key of the
   right kind for that recipient and that key set version. The keys of another
   party, or of another date, do not read it.
@@ -339,25 +337,24 @@ does.
   cannot read a VI, whoever handed it one.
 - **A pseudonym is stable per party, also across key sets, and differs
   otherwise.** The same citizen always has the same pseudonym at one party,
-  whatever its key set version and whichever activation the PP came from.
-  Two parties cannot match their pseudonyms, and neither can get the BSN from
-  its own. Only the encrypted value is bound to a key set: a party that gets
-  new keys keeps its pseudonyms, but VPs made for its old keys have to be made
+  whatever its key set version and whichever activation the PP came from. Two
+  parties cannot match their pseudonyms, and neither can get the BSN from its
+  own. Only the encrypted value is bound to a key set: a party that gets new
+  keys keeps its pseudonyms, but VPs made for its old keys have to be made
   again.
-- **A nonce is 8 to 128 letters and digits.** A UUID needs its hyphens
-  removed.
+- **A nonce is 8 to 128 letters and digits.** A UUID needs its hyphens removed.
 - **A PI or PP cannot be read** by anyone.
 - **An altered or made-up value is rejected.**
 
 ## Stable or randomised values
 
-By default the same request gives the same value, so a test can compare
-against a fixture. The issuance date is then fixed at `20260101`.
+By default the same request gives the same value, so a test can compare against
+a fixture. The issuance date is then fixed at `20260101`.
 
 The real BSNk gives a different value on every request, even for the same
-citizen and the same party. Code that compares two values, or uses one as a
-key, passes against stable values and breaks against real ones. To catch that,
-switch randomisation on: set `RANDOMIZE_VALUES=true` for the service, or add
+citizen and the same party. Code that compares two values, or uses one as a key,
+passes against stable values and breaks against real ones. To catch that, switch
+randomisation on: set `RANDOMIZE_VALUES=true` for the service, or add
 `?randomize=true` to an activate or transform request. The values then differ
 every time and still read as the same BSN or pseudonym. The issuance date is
 then the first of the current month.
@@ -368,30 +365,30 @@ then the first of the current month.
 - No check that the requester is who it says it is; `Requester` is taken from
   the request.
 - No check of the BSN or the verification data against a population register.
-- No record of which key sets a party has; a transformation accepts any key
-  set version.
+- No record of which key sets a party has; a transformation accepts any key set
+  version.
 - One scheme and one scheme key set.
 - The variants the demo does not use: encrypted BSN input, link verification,
   direct encrypted values, pseudonym migration and closing key conversion.
 
 ## Configuration
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `PORT` | `4003` | Listening port |
-| `BSN_AUTHORISED_OINS` | empty | Comma-separated OINs that may receive the BSN. Empty means no party can get an identity |
-| `RANDOMIZE_VALUES` | `false` | Whether values differ on every request |
-| `DECRYPTION_COMPONENT_ONLY` | `false` | Serve the decryption endpoints alone, as the component a party runs itself |
+| Variable                    | Default | Meaning                                                                                 |
+| --------------------------- | ------- | --------------------------------------------------------------------------------------- |
+| `PORT`                      | `4003`  | Listening port                                                                          |
+| `BSN_AUTHORISED_OINS`       | empty   | Comma-separated OINs that may receive the BSN. Empty means no party can get an identity |
+| `RANDOMIZE_VALUES`          | `false` | Whether values differ on every request                                                  |
+| `DECRYPTION_COMPONENT_ONLY` | `false` | Serve the decryption endpoints alone, as the component a party runs itself              |
 
 ## Logboek Dataverwerkingen
 
-The consent portal records its call to BSNk as a Dataverwerking of its own
-and sets `dpl.read.nextLogbookId` to this page (`LDV_BSNK_NEXT_LOGBOOK_ID`).
-A source that reads its value calls nobody, so its record points nowhere.
-The read extension asks for the read API of the party that was called; for a
-party without one it allows a page with contact details instead. The mock
-keeps no logbook, so this page is the honest answer to where its side of a
-transform can be looked up.
+The consent portal records its call to BSNk as a Dataverwerking of its own and
+sets `dpl.read.nextLogbookId` to this page (`LDV_BSNK_NEXT_LOGBOOK_ID`). A
+source that reads its value calls nobody, so its record points nowhere. The read
+extension asks for the read API of the party that was called; for a party
+without one it allows a page with contact details instead. The mock keeps no
+logbook, so this page is the honest answer to where its side of a transform can
+be looked up.
 
-In a real chain the value is whatever Logius publishes for BSNk: the read API
-of its logbook, or its contact point until there is one.
+In a real chain the value is whatever Logius publishes for BSNk: the read API of
+its logbook, or its contact point until there is one.

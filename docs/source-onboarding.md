@@ -1,8 +1,8 @@
 # Bronnen configureren en activeren
 
 Een handmatig beheerd bestand in `sources/configured/` is de enige trigger om
-een bron te onboarden. Een FSC-contract alleen maakt dus nooit een bron aan.
-De bestandsnaam zonder extensie is de stabiele `source_id`: zo wordt
+een bron te onboarden. Een FSC-contract alleen maakt dus nooit een bron aan. De
+bestandsnaam zonder extensie is de stabiele `source_id`: zo wordt
 `belastingdienst.yaml` de bron `belastingdienst`. Iedere logische bron verwijst
 naar een vooraf beheerde issuer-, reader- en statuscertificaatset met dezelfde
 sleutel als de `source_id`. De reconciler leest de juridische OIN en
@@ -11,8 +11,8 @@ nogmaals in de bronconfig. De reconciler mint of vernieuwt geen certificaten.
 
 De bron blijft eigenaar van `/.well-known/gbo`. Dat document bevat per type de
 GraphQL-query, parameters, concrete walletaanbiedingen, de kaartpresentatie en
-de claims. GBO genereert daaruit de mapping en de Type Metadata. GBO bevat geen bron- of jaarcatalogus en de bron publiceert geen
-GraphQL-schema.
+de claims. GBO genereert daaruit de mapping en de Type Metadata. GBO bevat geen
+bron- of jaarcatalogus en de bron publiceert geen GraphQL-schema.
 
 ## Architectuur
 
@@ -87,30 +87,29 @@ Onboarding bestaat daarom uit twee expliciete fasen:
    transport, FSC-contracten, schema, mapping, geldigheid en certificaten. Het
    resultaat is een complete maar nog niet actieve kandidaat met status
    `rollout_required`.
-2. **Promotie** maakt uit één gevalideerde kandidaatset alle runtimeproducten
-   en activeert die als één consistente release.
+2. **Promotie** maakt uit één gevalideerde kandidaatset alle runtimeproducten en
+   activeert die als één consistente release.
 
 De promotie levert vier samenhangende producten op:
 
-| Product | Gebruikt door | Functie |
-| --- | --- | --- |
-| Actieve bronsnapshot | EUDI-adapter | Bron, query, mapping, FSC-grant en geldigheidsvenster |
-| Immutable Type Metadata | Wallet via EUDI-adapter | VCT, claimschema en walletpresentatie |
-| `issuance_server.toml` | nl-wallet issuance-server | Offers, disclosure, certificaten en trust anchors |
-| `eudi-offers.json` | Developer-portal en landingspagina | De uitgiftekeuzes die een gebruiker kan starten |
+| Product                 | Gebruikt door                      | Functie                                               |
+| ----------------------- | ---------------------------------- | ----------------------------------------------------- |
+| Actieve bronsnapshot    | EUDI-adapter                       | Bron, query, mapping, FSC-grant en geldigheidsvenster |
+| Immutable Type Metadata | Wallet via EUDI-adapter            | VCT, claimschema en walletpresentatie                 |
+| `issuance_server.toml`  | nl-wallet issuance-server          | Offers, disclosure, certificaten en trust anchors     |
+| `eudi-offers.json`      | Developer-portal en landingspagina | De uitgiftekeuzes die een gebruiker kan starten       |
 
 Deze producten moeten uit exact dezelfde kandidaatset komen. Een gedeeltelijke
 uitrol kan bijvoorbeeld een offer tonen waarvoor de issuance-server nog geen
-configuratie heeft, of een credential uitgeven waarvan de publieke Type
-Metadata ontbreekt. De issuance-server herlaadt zijn productconfiguratie niet
-dynamisch; een promotie vereist daarom altijd een gecontroleerde rollout.
+configuratie heeft, of een credential uitgeven waarvan de publieke Type Metadata
+ontbreekt. De issuance-server herlaadt zijn productconfiguratie niet dynamisch;
+een promotie vereist daarom altijd een gecontroleerde rollout.
 
 In een wegwerpbare demo mag de expliciete goedkeuring worden overgeslagen met
-`reconcile-sources --auto-promote`. De reconciler genereert en promoveert dan
-na een volledig succesvolle reconciliation automatisch. Dit verandert niets
-aan de technische noodzaak om de issuance-server na een gewijzigde TOML te
-herstarten. De optie staat standaard uit en hoort niet in een
-productieomgeving.
+`reconcile-sources --auto-promote`. De reconciler genereert en promoveert dan na
+een volledig succesvolle reconciliation automatisch. Dit verandert niets aan de
+technische noodzaak om de issuance-server na een gewijzigde TOML te herstarten.
+De optie staat standaard uit en hoort niet in een productieomgeving.
 
 ## Transportprofielen
 
@@ -123,24 +122,25 @@ metadata_endpoint:
   service_reference: gbo-metadata-bd
 ```
 
-GBO resolveert zowel het geconfigureerde metadatacontract als de dataservice
-uit actuele FSC-contracten. Dit blijft de bedoelde vorm: beide benen
-geauthenticeerd, met twee gescheiden services. `provider_peer_id` selecteert de FSC-provider van
-beide contracten en mag exact twintig alfanumerieke tekens bevatten. Het vaste
-pad `/.well-known/gbo`, het datatransport en grant-hashes worden automatisch
-ingevuld. De twintigcijferige juridische OIN en organisatienaam komen uit de
-vooraf beheerde certificaatset en moeten overeenkomen met het brondocument.
+GBO resolveert zowel het geconfigureerde metadatacontract als de dataservice uit
+actuele FSC-contracten. Dit blijft de bedoelde vorm: beide benen
+geauthenticeerd, met twee gescheiden services. `provider_peer_id` selecteert de
+FSC-provider van beide contracten en mag exact twintig alfanumerieke tekens
+bevatten. Het vaste pad `/.well-known/gbo`, het datatransport en grant-hashes
+worden automatisch ingevuld. De twintigcijferige juridische OIN en
+organisatienaam komen uit de vooraf beheerde certificaatset en moeten
+overeenkomen met het brondocument.
 
 Meerdere logische bronnen mogen hetzelfde FSC-Peer ID gebruiken. `source_id`, de
-metadata-service en gelijknamige certificaatset blijven per bron uniek. De lokale
-Belastingdienst- en RvIG-bronnen gebruiken dit model.
+metadata-service en gelijknamige certificaatset blijven per bron uniek. De
+lokale Belastingdienst- en RvIG-bronnen gebruiken dit model.
 
 ### Unsecured
 
-De meegeleverde unsecured voorbeeldbron staat bewust in
-`sources/local-demo/`. Alleen de lokale Docker Compose-configuratie monteert
-dit bestand. Simulatie- en productieconfiguraties gebruiken uitsluitend
-`sources/configured/` en bieden deze bron dus niet aan.
+De meegeleverde unsecured voorbeeldbron staat bewust in `sources/local-demo/`.
+Alleen de lokale Docker Compose-configuratie monteert dit bestand. Simulatie- en
+productieconfiguraties gebruiken uitsluitend `sources/configured/` en bieden
+deze bron dus niet aan.
 
 ```yaml
 metadata_endpoint:
@@ -154,8 +154,8 @@ overeenkomen met het vooraf beheerde certificaat, maar de transportlaag
 authenticeert die identiteit niet. De status bevat daarom altijd
 `transport_authenticated: false`.
 
-Dit profiel is bedoeld voor demonstraties of afgeschermde netwerken. HTTPS
-maakt het profiel niet brongebonden: zonder apart vastgelegde client- of
+Dit profiel is bedoeld voor demonstraties of afgeschermde netwerken. HTTPS maakt
+het profiel niet brongebonden: zonder apart vastgelegde client- of
 serveridentiteit blijft het `unsecured`. Autorisatie van het dataverzoek blijft
 de verantwoordelijkheid van het gepubliceerde bronendpoint.
 
@@ -177,16 +177,16 @@ resolutie opnieuw gecontroleerd. Het profiel bestaat voor bronnen die zelf geen
 `/.well-known/gbo` publiceren.
 
 Wat vervalt is het ophalen, niet de controle. Het document wordt nog steeds
-tegen het schema gevalideerd, de OIN moet nog steeds overeenkomen met de
-vooraf beheerde certificaatset, en promotie blijft een aparte stap. Wat wél
-verandert is wie inhoudelijk tekent: zonder bronendpoint neemt de beheerder de
+tegen het schema gevalideerd, de OIN moet nog steeds overeenkomen met de vooraf
+beheerde certificaatset, en promotie blijft een aparte stap. Wat wél verandert
+is wie inhoudelijk tekent: zonder bronendpoint neemt de beheerder de
 productbeschrijving van een ander over. Leg vast wie daarmee akkoord is.
 
 Een bestand heeft geen eigen versheid. De bytes leveren de ETag, dus een
-ongewijzigd document verlengt de freshness zoals een `304` dat doet. `expires_at`
-moet minimaal een uur in de toekomst liggen; anders wordt de bron `stale` en
-daarna `blocked`. Dat een document onderhoud vraagt is de reden om de bron
-alsnog naar een eigen metadata-endpoint te bewegen, niet een vaste taak.
+ongewijzigd document verlengt de freshness zoals een `304` dat doet.
+`expires_at` moet minimaal een uur in de toekomst liggen; anders wordt de bron
+`stale` en daarna `blocked`. Dat een document onderhoud vraagt is de reden om de
+bron alsnog naar een eigen metadata-endpoint te bewegen, niet een vaste taak.
 
 ### De twee benen afzonderlijk kiezen
 
@@ -194,15 +194,15 @@ alsnog naar een eigen metadata-endpoint te bewegen, niet een vaste taak.
 transport als het metadatabeen, precies zoals voorheen. Mét dat blok kiest een
 bron ze los van elkaar:
 
-| metadata | data | Toegestaan |
-| --- | --- | --- |
-| `fsc` | `fsc` | ja; de twee services moeten verschillen |
-| `fsc` | `unsecured` | nee |
-| `unsecured` | `fsc` | ja |
-| `unsecured` | `unsecured` | ja |
-| `file` | `fsc` | ja |
-| `file` | `unsecured` | ja |
-| `file` | — | nee; een bestand zegt niets over het bereiken van de bron |
+| metadata    | data        | Toegestaan                                                |
+| ----------- | ----------- | --------------------------------------------------------- |
+| `fsc`       | `fsc`       | ja; de twee services moeten verschillen                   |
+| `fsc`       | `unsecured` | nee                                                       |
+| `unsecured` | `fsc`       | ja                                                        |
+| `unsecured` | `unsecured` | ja                                                        |
+| `file`      | `fsc`       | ja                                                        |
+| `file`      | `unsecured` | ja                                                        |
+| `file`      | —           | nee; een bestand zegt niets over het bereiken van de bron |
 
 Een bron is één FSC-peer. `provider_peer_id` staat daarom op het been dat FSC
 spreekt en mag niet op beide staan. De dataservice en de grant-hash blijven
@@ -210,7 +210,7 @@ afgeleid uit respectievelijk het brondocument en de actuele contracten; ze zijn
 geen beheerdersinvoer.
 
 Een gescheiden combinatie is een onboardingfase, geen eindtoestand. Bij
-`unsecured` of `file` metadata arriveert de *beschrijving* van een
+`unsecured` of `file` metadata arriveert de _beschrijving_ van een
 FSC-geauthenticeerde datacall over een niet-geauthenticeerd kanaal: wie dat
 document beheerst, bepaalt query, mapping en de claims die in de wallet
 belanden. Wat de schade begrenst is dat het Peer ID uit de eigen configuratie
@@ -265,21 +265,21 @@ sequenceDiagram
 ```
 
 Een promotie schrijft eerst een release met immutable materiaal en wijzigt
-daarna binnen dezelfde databasetransactie de singleton `active_release_id`.
-Een hercontrole die alleen freshness- en stale-grace-tijden verlengt, hergebruikt
-dezelfde release-ID en werkt uitsluitend die lifecycle-observaties bij. De adapter pollt
-de actieve toestand en vervangt zijn in-memory snapshot atomair. Alleen bij een
-gewijzigd release-ID laadt hij het complete materiaal opnieuw; ook volledig
-nieuwe bronnen worden zo zichtbaar zonder restart. De issuance-server leest
-zijn TOML alleen bij het opstarten, dus die pod of container moet na promotie
-wel gecontroleerd worden herstart. De frontends halen de offercatalogus
-dynamisch bij de adapter op en hoeven niet te herstarten.
+daarna binnen dezelfde databasetransactie de singleton `active_release_id`. Een
+hercontrole die alleen freshness- en stale-grace-tijden verlengt, hergebruikt
+dezelfde release-ID en werkt uitsluitend die lifecycle-observaties bij. De
+adapter pollt de actieve toestand en vervangt zijn in-memory snapshot atomair.
+Alleen bij een gewijzigd release-ID laadt hij het complete materiaal opnieuw;
+ook volledig nieuwe bronnen worden zo zichtbaar zonder restart. De
+issuance-server leest zijn TOML alleen bij het opstarten, dus die pod of
+container moet na promotie wel gecontroleerd worden herstart. De frontends halen
+de offercatalogus dynamisch bij de adapter op en hoeven niet te herstarten.
 
 De reconciler draait bij startup, daarna periodiek met `--watch`, of eenmalig
 met `reconcile-sources --once`. In watch-modus worden de configuratiebestanden
 bij iedere cyclus opnieuw gelezen. `ETag`/`If-None-Match`, monotone versies,
-immutable bytes, freshness en stale grace worden door de reconciler bewaakt;
-de HTTP-issuance-runtime haalt zelf nooit bronmetadata op.
+immutable bytes, freshness en stale grace worden door de reconciler bewaakt; de
+HTTP-issuance-runtime haalt zelf nooit bronmetadata op.
 
 Per bron staat de actuele toestand duurzaam in de Source Registry:
 
@@ -302,8 +302,8 @@ kan daardoor niet stil uit de walletproducten verdwijnen.
 ## Claims en Type Metadata
 
 Een attestation bestaat uit `type_id`, `type_version`, `offers`, `graphql`,
-`mapping_profile`, `display` en `claims`. Iedere claim staat precies één keer
-in `claims`; de sleutel is de claimnaam in het credential:
+`mapping_profile`, `display` en `claims`. Iedere claim staat precies één keer in
+`claims`; de sleutel is de claimnaam in het credential:
 
 ```json
 "display": {
@@ -338,30 +338,29 @@ in `claims`; de sleutel is de claimnaam in het credential:
   weigert onboarding het document.
 - De volgorde van `claims` en van de talen is de volgorde in de wallet.
 - Claimnamen die de issuer of wallet zelf zet (`vct`, `iss`, `status`, `cnf`,
-  `iat`, `nbf`, `exp`, `sub`, `attestation_qualification`) zijn niet
-  toegestaan.
-- Het formaat is gesloten: onbekende velden worden geweigerd. Er is geen
-  escape hatch om losse Type Metadata-velden door te geven; uitbreiding is een
+  `iat`, `nbf`, `exp`, `sub`, `attestation_qualification`) zijn niet toegestaan.
+- Het formaat is gesloten: onbekende velden worden geweigerd. Er is geen escape
+  hatch om losse Type Metadata-velden door te geven; uitbreiding is een
   GBO-wijziging.
 
 GBO genereert de gepubliceerde Type Metadata volledig:
 
-| Type Metadata | Afgeleid uit |
-| --- | --- |
-| `name`, `description` | de eerste taal in `display` |
-| `display[]` | `display`, met `lang` uit de sleutel |
-| `claims[].path` en `svg_id` | de claimnaam |
-| `claims[].display[]` | `label` en `description` |
-| `claims[].sd` | `sd`, standaard `always` |
-| `schema.properties` | `source.datatype`: `date` wordt `string` met `format: date`, `gYear` wordt `integer`, de rest blijft gelijk |
-| `schema.required` | alle claims zonder `optional: true`, plus `vct` en `vct#integrity` |
-| `vct`, `vct#integrity` | de VCT-URL en de gepubliceerde bytes |
+| Type Metadata               | Afgeleid uit                                                                                                |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `name`, `description`       | de eerste taal in `display`                                                                                 |
+| `display[]`                 | `display`, met `lang` uit de sleutel                                                                        |
+| `claims[].path` en `svg_id` | de claimnaam                                                                                                |
+| `claims[].display[]`        | `label` en `description`                                                                                    |
+| `claims[].sd`               | `sd`, standaard `always`                                                                                    |
+| `schema.properties`         | `source.datatype`: `date` wordt `string` met `format: date`, `gYear` wordt `integer`, de rest blijft gelijk |
+| `schema.required`           | alle claims zonder `optional: true`, plus `vct` en `vct#integrity`                                          |
+| `vct`, `vct#integrity`      | de VCT-URL en de gepubliceerde bytes                                                                        |
 
 nl-wallet valideert ieder uitgegeven credential tegen dat schema. Omdat het
 schema uit dezelfde regels komt als de projectie, kan een bron geen schema
-publiceren dat afwijkt van wat de mapping werkelijk vult. Volgen latere
-SD-JWT VC-drafts een andere vorm (zoals het wegvallen van `schema`), dan is
-dat een wijziging in GBO en niet in ieder brondocument.
+publiceren dat afwijkt van wat de mapping werkelijk vult. Volgen latere SD-JWT
+VC-drafts een andere vorm (zoals het wegvallen van `schema`), dan is dat een
+wijziging in GBO en niet in ieder brondocument.
 
 Vastgelegde keuzes:
 
@@ -371,21 +370,20 @@ Vastgelegde keuzes:
 - **Geen `unit`.** Niets las het veld en SD-JWT VC Type Metadata kent het niet.
   Een eenheid die de gebruiker moet zien hoort in de claim-`description`, zoals
   `"Bedrag in euro's"`.
-- **`schema_version` blijft `1.0`.** De vorm is in place gewijzigd, omdat er
-  nog geen externe bronnen waren; `mapping`, `attribute_schema` en
-  `type_metadata` worden niet meer geaccepteerd.
-  Een registry die nog kandidaten van een oudere adapter bevat (snapshot
-  `schema_version` anders dan `3.0` of `4.0`), behandelt die als afwezig: de
-  reconciler haalt de metadata volledig opnieuw op en activeert de bron
-  opnieuw. Een kandidaat die daarna nog steeds niet laadbaar is, wordt niet
-  gepromoveerd. Tot de nieuwe release actief is, weigert de issuance-runtime
-  de oude release.
-- **`number` blijft geweigerd** voor de EUDI-capability: nl-wallet v0.5 kan
-  geen niet-integrale waarden representeren.
+- **`schema_version` blijft `1.0`.** De vorm is in place gewijzigd, omdat er nog
+  geen externe bronnen waren; `mapping`, `attribute_schema` en `type_metadata`
+  worden niet meer geaccepteerd. Een registry die nog kandidaten van een oudere
+  adapter bevat (snapshot `schema_version` anders dan `3.0` of `4.0`), behandelt
+  die als afwezig: de reconciler haalt de metadata volledig opnieuw op en
+  activeert de bron opnieuw. Een kandidaat die daarna nog steeds niet laadbaar
+  is, wordt niet gepromoveerd. Tot de nieuwe release actief is, weigert de
+  issuance-runtime de oude release.
+- **`number` blijft geweigerd** voor de EUDI-capability: nl-wallet v0.5 kan geen
+  niet-integrale waarden representeren.
 
-Een wijziging van claims of display verandert de gepubliceerde Type Metadata
-en dus de integriteitswaarde. Verhoog daarom `type_version` (een nieuwe VCT),
-zodat eerder uitgegeven credentials naar hun eigen, ongewijzigde bytes blijven
+Een wijziging van claims of display verandert de gepubliceerde Type Metadata en
+dus de integriteitswaarde. Verhoog daarom `type_version` (een nieuwe VCT), zodat
+eerder uitgegeven credentials naar hun eigen, ongewijzigde bytes blijven
 verwijzen.
 
 ## Attributen voor verificatie (`asi`)
@@ -404,25 +402,24 @@ herstart) en gebruikt de beschrijving voor drie dingen:
 - de discovery-records: één per attribuut, met het land uit
   `authentic_source.country`.
 
-Zonder actuele beschrijving, omdat de bron er geen heeft of omdat haar
-metadata verlopen is, antwoordt de ASIP met 503 op verify, retrieve en
-discovery.
+Zonder actuele beschrijving, omdat de bron er geen heeft of omdat haar metadata
+verlopen is, antwoordt de ASIP met 503 op verify, retrieve en discovery.
 
 - **Een fout in `asi` weigert de hele bron**, ook als `eudi` klopt. Zo werkt een
   foute attestation ook; de actieve release blijft staan.
-- **De query van `asi` volgt dezelfde transportregels als die van `eudi`.**
-  Het endpoint past bij het datatransport (een pad bij FSC, een absolute URL
-  bij unsecured), en `service_reference` is dezelfde FSC-dataservice als die
-  van de attestations: één document gebruikt één dataservice.
+- **De query van `asi` volgt dezelfde transportregels als die van `eudi`.** Het
+  endpoint past bij het datatransport (een pad bij FSC, een absolute URL bij
+  unsecured), en `service_reference` is dezelfde FSC-dataservice als die van de
+  attestations: één document gebruikt één dataservice.
 - **Een document met alleen `asi` wordt nog geweigerd.** Het schema staat het
   toe, maar onboarding eist per bron issuer-, reader- en statuscertificaten, en
   welke certificaten een bron nodig heeft die alleen verificatie aanbiedt, is
   nog niet uitgewerkt.
 - **Een bron met `asi` krijgt snapshotversie `4.0`** in de Source Registry;
-  zonder `asi` blijft het `3.0`. Een adapter van vóór `asi` leest alleen
-  `3.0`. Na een rollback haalt hij een bron met `asi` dus opnieuw op en
-  weigert hij het 1.1-document, in plaats van de kandidaat zonder `asi` te
-  herschrijven. Bronnen zonder `asi` merken niets van de rollback.
+  zonder `asi` blijft het `3.0`. Een adapter van vóór `asi` leest alleen `3.0`.
+  Na een rollback haalt hij een bron met `asi` dus opnieuw op en weigert hij het
+  1.1-document, in plaats van de kandidaat zonder `asi` te herschrijven. Bronnen
+  zonder `asi` merken niets van de rollback.
 - **De attribuutcatalogus staat naast het schema** (`asi-attributes.json` in de
   map van `--schema`). Kan de reconciler hem niet lezen, dan worden alleen de
   bronnen met `asi` geweigerd; bronnen zonder `asi` gaan door.
@@ -463,31 +460,33 @@ discovery.
 - **Eén query.** `document` bevat precies één operatie, een query, met
   `subject_variable` als variabele. De query is één pad van velden dat eindigt
   in alleen `...Selected`: geen vaste velden ernaast, geen fragmenten en geen
-  directives. Een type kies je met `on`, niet met een fragment. De ASIP
-  vervangt `...Selected` per verzoek door de velden die de gevraagde attributen
-  nodig hebben: `/woontOp/straatnaam` wordt `woontOp { straatnaam }`, en `on`
-  zet het in `... on Ingezetene { … }`. Een verzoek blijft zo één vraag aan de
-  bron, met alleen de nodige velden.
+  directives. Een type kies je met `on`, niet met een fragment. De ASIP vervangt
+  `...Selected` per verzoek door de velden die de gevraagde attributen nodig
+  hebben: `/woontOp/straatnaam` wordt `woontOp { straatnaam }`, en `on` zet het
+  in `... on Ingezetene { … }`. Een verzoek blijft zo één vraag aan de bron, met
+  alleen de nodige velden.
 - **De vorm van de waarde is van GBO.** `identifier` moet voorkomen in GBO's
-  attribuutcatalogus [`schemas/asi-attributes.json`](../schemas/asi-attributes.json),
-  die per identifier een `value_schema` geeft. Dat is een voorlopige plek tot
-  de EU-catalogus van attributen de schema's levert; de identifiers zijn tot
-  dan placeholders. De schema's gebruiken alleen `type`, `properties`,
-  `required`, `items` en `format`.
+  attribuutcatalogus
+  [`schemas/asi-attributes.json`](../schemas/asi-attributes.json), die per
+  identifier een `value_schema` geeft. Dat is een voorlopige plek tot de
+  EU-catalogus van attributen de schema's levert; de identifiers zijn tot dan
+  placeholders. De schema's gebruiken alleen `type`, `properties`, `required`,
+  `items` en `format`.
 - **De bron koppelt haar eigen velden.** `fields` heeft per lid van het
   `value_schema` precies één bewerking:
 
-  | Bewerking | Betekenis |
-  | --- | --- |
-  | `pointer` | kopieer het veld |
-  | `join` + `separator` | voeg minstens twee velden samen; lege delen vallen weg, getallen worden tekst |
-  | `const` | een vaste waarde, van het type van het lid |
-  | `each` + `pointer` | per element van de lijst bij `each` het veld bij `pointer`; alleen voor een lijst-lid, en een lijst-lid heeft het altijd |
+  | Bewerking            | Betekenis                                                                                                                |
+  | -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+  | `pointer`            | kopieer het veld                                                                                                         |
+  | `join` + `separator` | voeg minstens twee velden samen; lege delen vallen weg, getallen worden tekst                                            |
+  | `const`              | een vaste waarde, van het type van het lid                                                                               |
+  | `each` + `pointer`   | per element van de lijst bij `each` het veld bij `pointer`; alleen voor een lijst-lid, en een lijst-lid heeft het altijd |
 
   Pointers zijn JSON Pointers (RFC 6901) met alleen GraphQL-veldnamen als
   segment, relatief aan `result_pointer` (en binnen `each` aan het element).
   Ieder verplicht lid heeft een koppeling; een veld dat geen lid is, wordt
   geweigerd.
+
 - **Wat niet gecontroleerd wordt.** Onboarding controleert de vorm, niet het
   GraphQL-schema van de bron en niet of de policy van de bron de selectie
   toestaat. Een verschil blijkt bij het eerste testverzoek.
@@ -499,24 +498,24 @@ EU-catalogus is nog niet bekend.
 
 ## Wat staat waar?
 
-| Gegeven | Eigenaar/bron |
-|---|---|
-| `source_id` | Bestandsnaam van de GBO-bronconfiguratie |
-| Transport en metadata-locator | Inhoud van de GBO-bronconfiguratie |
-| Datatransport en FSC-peer | Inhoud van de GBO-bronconfiguratie |
-| Brondocument zonder bronendpoint | Beheerde metadatadirectory (`--metadata-dir`) |
-| Juridische `source_oin`, organisatienaam en certificatenset | Vooraf beheerde certificaten onder de sleutel `source_id` |
-| FSC provider Peer ID, services en grant-hashes | actuele FSC-contracten |
-| GraphQL-endpoint, query, parameters, offers en mapping | `/.well-known/gbo` van de bron |
-| Kaartnaam, kleur, kaartlogo, summary en claimlabels | `display` en `claims` in het brondocument |
-| Claimschema, `required`, `svg_id` en `vct` | Door GBO gegenereerde Type Metadata |
-| Attributen voor verificatie en hun koppeling op de eigen velden | `asi` in `/.well-known/gbo` van de bron |
-| Vorm van een attribuutwaarde (`value_schema`) per identifier | GBO's attribuutcatalogus `schemas/asi-attributes.json` |
-| Getoonde issuernaam en issuerlogo | vooraf beheerde issuer-/readercertificaten |
-| Kandidaten, statussen, immutable releases, Type Metadata en publieke offercatalogus | PostgreSQL Source Release Registry |
-| Actieve release | transactionele singleton `active_release_id` |
-| Private keys | Kubernetes Secret of lokale secretopslag; uitsluitend gemount in de issuance-materializer |
-| Publieke certificaatidentiteit en SHA-256-digest | Source Release Registry |
+| Gegeven                                                                             | Eigenaar/bron                                                                             |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `source_id`                                                                         | Bestandsnaam van de GBO-bronconfiguratie                                                  |
+| Transport en metadata-locator                                                       | Inhoud van de GBO-bronconfiguratie                                                        |
+| Datatransport en FSC-peer                                                           | Inhoud van de GBO-bronconfiguratie                                                        |
+| Brondocument zonder bronendpoint                                                    | Beheerde metadatadirectory (`--metadata-dir`)                                             |
+| Juridische `source_oin`, organisatienaam en certificatenset                         | Vooraf beheerde certificaten onder de sleutel `source_id`                                 |
+| FSC provider Peer ID, services en grant-hashes                                      | actuele FSC-contracten                                                                    |
+| GraphQL-endpoint, query, parameters, offers en mapping                              | `/.well-known/gbo` van de bron                                                            |
+| Kaartnaam, kleur, kaartlogo, summary en claimlabels                                 | `display` en `claims` in het brondocument                                                 |
+| Claimschema, `required`, `svg_id` en `vct`                                          | Door GBO gegenereerde Type Metadata                                                       |
+| Attributen voor verificatie en hun koppeling op de eigen velden                     | `asi` in `/.well-known/gbo` van de bron                                                   |
+| Vorm van een attribuutwaarde (`value_schema`) per identifier                        | GBO's attribuutcatalogus `schemas/asi-attributes.json`                                    |
+| Getoonde issuernaam en issuerlogo                                                   | vooraf beheerde issuer-/readercertificaten                                                |
+| Kandidaten, statussen, immutable releases, Type Metadata en publieke offercatalogus | PostgreSQL Source Release Registry                                                        |
+| Actieve release                                                                     | transactionele singleton `active_release_id`                                              |
+| Private keys                                                                        | Kubernetes Secret of lokale secretopslag; uitsluitend gemount in de issuance-materializer |
+| Publieke certificaatidentiteit en SHA-256-digest                                    | Source Release Registry                                                                   |
 
 De maximale mappingfunctionaliteit staat in
 [`gbo-simple-v1.md`](gbo-simple-v1.md). Onbekende functies en velden worden
@@ -528,11 +527,10 @@ broncode en moeten fail-closed regressietests hebben.
 Plaats voor een echte testwallet eerst de reeds vertrouwde ontwikkel-CA's in
 `.local/secrets/development-ca/`, of zet `ONBOARDING_SECRETS_DIR` op een
 beheerde secrets-root met de submap `development-ca/`; zie de
-[volledige demo met EUDI](../README.md#the-complete-demo-with-eudi).
-Onboarding genereert uitsluitend brongebonden leafcertificaten. De issuer- en
-reader-CA worden nooit gegenereerd en ontbrekende CA-bestanden laten de setup
-direct stoppen.
-Daarna voert dit target de volledige onboarding uit:
+[volledige demo met EUDI](../README.md#the-complete-demo-with-eudi). Onboarding
+genereert uitsluitend brongebonden leafcertificaten. De issuer- en reader-CA
+worden nooit gegenereerd en ontbrekende CA-bestanden laten de setup direct
+stoppen. Daarna voert dit target de volledige onboarding uit:
 
 ```sh
 make onboard-demo-sources
@@ -548,8 +546,8 @@ start daarna de issuance-server. Na een latere metadatawijziging voert
 
 ### Inspectie en rollback
 
-Inspecteer uitsluitend de niet-geheime identiteit, versies en freshness van
-de actieve release:
+Inspecteer uitsluitend de niet-geheime identiteit, versies en freshness van de
+actieve release:
 
 ```sh
 docker compose --profile onboarding run --rm source-reconciler \
@@ -567,16 +565,16 @@ docker compose --profile onboarding run --rm source-reconciler \
 
 De adapter neemt de complete release bij zijn volgende refresh over. Draai
 daarna `make eudi-config` om de issuance-configuratie uit dezelfde release te
-rematerialiseren en de issuance-server te herstarten. In Kubernetes gebeurt
-dit door de issuance-pod opnieuw aan te maken, zodat de init-container opnieuw
+rematerialiseren en de issuance-server te herstarten. In Kubernetes gebeurt dit
+door de issuance-pod opnieuw aan te maken, zodat de init-container opnieuw
 draait. Een onbekend release-ID wijzigt de actieve pointer niet.
 
 Het commando laadt de doelrelease eerst zoals de adapter dat doet, en weigert
 een release die de adapter niet kan laden, ook dan zonder de actieve pointer te
 wijzigen. Releases van vóór snapshotschema `3.0` (de claims-once-vorm) blijven
-in PostgreSQL staan, maar zijn met deze adapter geen rollbackdoel. Wie naar
-zo'n release terug wil, moet ook de adapter terugzetten naar een versie die
-dat schema leest.
+in PostgreSQL staan, maar zijn met deze adapter geen rollbackdoel. Wie naar zo'n
+release terug wil, moet ook de adapter terugzetten naar een versie die dat
+schema leest.
 
 Een reconciler met `--watch --auto-promote` respecteert deze handmatige
 rollback. Wanneer de huidige kandidaatset al als release bestaat, maar een
@@ -589,8 +587,7 @@ wordt wel automatisch geactiveerd; een rollback is dus geen permanente freeze.
 Gebruik hetzelfde adapterimage voor drie afzonderlijke rollen:
 
 - één reconciler-Deployment met `reconcile-sources --watch --migrate`, één
-  replica en het registry writer-account, of
-  een CronJob met `--once`;
+  replica en het registry writer-account, of een CronJob met `--once`;
 - de stateless HTTP-adapter met een read-only registry-account;
 - een issuance init-container met een read-only registry-account, het
   certificaat-Secret en een schrijfbare runtime-`emptyDir`.
@@ -598,7 +595,8 @@ Gebruik hetzelfde adapterimage voor drie afzonderlijke rollen:
 De rollen gebruiken dezelfde applicatie-eigen Source Registry, maar met
 least-privilege credentials. Voorbeeldwaarden staan in
 [`source-reconciler-values.yaml`](../deploy/helm/gbo-app/examples/source-reconciler-values.yaml)
-en [`eudi-adapter-values.yaml`](../deploy/helm/gbo-app/examples/eudi-adapter-values.yaml).
+en
+[`eudi-adapter-values.yaml`](../deploy/helm/gbo-app/examples/eudi-adapter-values.yaml).
 
 Het aanmaken van de registrydatabase en het toepassen van het schema zijn geen
 onderdeel van die drie rollen. Het zijn eenmalige taken, en ze draaien als Job
@@ -613,12 +611,12 @@ issuance-server. Welke vorm bij welke taak hoort — Deployment, Job of
 init-container — staat in
 [`deploy/helm/gbo-app/README.md`](../deploy/helm/gbo-app/README.md).
 
-Voer een eerste Kubernetes-activatie bij voorkeur in twee gecontroleerde
-stappen uit. Laat eerst een eenmalige reconciler-Job de complete kandidaatset
-naar de registry promoveren en controleer dat alle statussen `active` zijn.
-Rol daarna pas de adapter en issuance-server uit. Daarmee kan de adapter niet
-vóór de promotie gezond starten met een lege release. Een latere
-metadatawijziging volgt dezelfde expliciete goedkeuringsgrens.
+Voer een eerste Kubernetes-activatie bij voorkeur in twee gecontroleerde stappen
+uit. Laat eerst een eenmalige reconciler-Job de complete kandidaatset naar de
+registry promoveren en controleer dat alle statussen `active` zijn. Rol daarna
+pas de adapter en issuance-server uit. Daarmee kan de adapter niet vóór de
+promotie gezond starten met een lege release. Een latere metadatawijziging volgt
+dezelfde expliciete goedkeuringsgrens.
 
 Voor een demo kan dezelfde reconciler automatisch promoveren:
 
@@ -628,11 +626,11 @@ reconcile-sources --watch --auto-promote --storage-backend=postgres
 
 Auto-promotie geeft de reconciler bewust geen Kubernetes-APIrechten en
 verwijdert dus niet zelf pods. De beheerder of deploymentautomatisering moet de
-issuance-server gecontroleerd herstarten nadat de actieve release verandert.
-De adapter neemt zowel gewijzigde als volledig nieuwe bronnen dynamisch over;
-de frontends lezen de offercatalogus eveneens dynamisch. Een expliciete
-rollback naar een bestaande release blijft actief totdat nieuwe kandidaatinhoud
-een nog niet eerder opgeslagen release oplevert.
+issuance-server gecontroleerd herstarten nadat de actieve release verandert. De
+adapter neemt zowel gewijzigde als volledig nieuwe bronnen dynamisch over; de
+frontends lezen de offercatalogus eveneens dynamisch. Een expliciete rollback
+naar een bestaande release blijft actief totdat nieuwe kandidaatinhoud een nog
+niet eerder opgeslagen release oplevert.
 
 Certificaatprovisioning blijft een afzonderlijk, bevoegd beheerproces. Alleen
 dat proces heeft de CA-private keys nodig. De reconciler krijgt via een Secret-
@@ -647,8 +645,8 @@ blijven voor dat runtime-account onzichtbaar. De database en beide rollen zelf
 worden door het platform geprovisioneerd.
 
 Gebruik `inspect-source-registry` met het reader-account voor diagnose. Maak
-voor `activate-source-release` een korte beheer-Job met het writer-account;
-geef het release-ID expliciet mee en verwijder de Job na afloop. Geef deze
+voor `activate-source-release` een korte beheer-Job met het writer-account; geef
+het release-ID expliciet mee en verwijder de Job na afloop. Geef deze
 beheeroperatie niet aan de stateless adapter of de issuance-server.
 
 ### Upgrade vanaf v0.6.1
@@ -657,26 +655,26 @@ De scheiding tussen FSC-identiteit en juridische bronidentiteit wijzigt enkele
 deploymentcontracten bewust fail-closed:
 
 - iedere FSC-bronconfiguratie krijgt `metadata_endpoint.provider_peer_id`; de
-  bestandsnaam vervangt het vroegere `source_id`-veld;
-  `source_oin`, naam, certset, metadata-path en `data_access` verdwijnen uit
-  deze configuratie en worden uit certificaten, vaste conventies, metadata en
-  actuele contracten afgeleid;
-- de reconciler gebruikt `--consumer-peer-id` of
-  `FSC_CONSUMER_PEER_ID`; `--consumer-oin` en `ISSUER_OIN` vervallen;
-- het DvTP-register krijgt een JSON-configuratie via
-  `ONBOARDING_CONFIG_PATH`, met `source_holders`, `system_participants` en
-  optionele `seed_participants`;
+  bestandsnaam vervangt het vroegere `source_id`-veld; `source_oin`, naam,
+  certset, metadata-path en `data_access` verdwijnen uit deze configuratie en
+  worden uit certificaten, vaste conventies, metadata en actuele contracten
+  afgeleid;
+- de reconciler gebruikt `--consumer-peer-id` of `FSC_CONSUMER_PEER_ID`;
+  `--consumer-oin` en `ISSUER_OIN` vervallen;
+- het DvTP-register krijgt een JSON-configuratie via `ONBOARDING_CONFIG_PATH`,
+  met `source_holders`, `system_participants` en optionele `seed_participants`;
 - de OpenFTV PIP-feed gebruikt `peer_id` en `allowed_source_peer_ids`.
 
-Rol eerst de DvTP-configuratie en de nieuwe register-/PDP-images samen uit.
-Laat daarna de source reconciler ten minste één succesvolle ronde uitvoeren
-voordat de HTTP-adapter als functioneel wordt beschouwd; zo worden bestaande
-activaties aangevuld met `provider_peer_id`. De runtime kan zonder CA-private
-keys starten zodra alle brongebonden leafbestanden en beide publieke
-CA-certificaten aanwezig zijn.
+Rol eerst de DvTP-configuratie en de nieuwe register-/PDP-images samen uit. Laat
+daarna de source reconciler ten minste één succesvolle ronde uitvoeren voordat
+de HTTP-adapter als functioneel wordt beschouwd; zo worden bestaande activaties
+aangevuld met `provider_peer_id`. De runtime kan zonder CA-private keys starten
+zodra alle brongebonden leafbestanden en beide publieke CA-certificaten aanwezig
+zijn.
 
 Voor Kubernetes staan voorbeelden in
 [`dvtp-onboarding-register-values.yaml`](../deploy/helm/gbo-app/examples/dvtp-onboarding-register-values.yaml),
 [`dvtp-onboarding-configmap.yaml`](../deploy/helm/gbo-app/examples/dvtp-onboarding-configmap.yaml),
 [`source-reconciler-values.yaml`](../deploy/helm/gbo-app/examples/source-reconciler-values.yaml)
-en [`eudi-adapter-values.yaml`](../deploy/helm/gbo-app/examples/eudi-adapter-values.yaml).
+en
+[`eudi-adapter-values.yaml`](../deploy/helm/gbo-app/examples/eudi-adapter-values.yaml).

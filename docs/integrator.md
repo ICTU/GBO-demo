@@ -1,10 +1,9 @@
 # Integrator namens een dienstverlener
 
 Dit document beschrijft hoe de demo een integrator laat bevragen namens een
-dienstverlener. Het is de bestaande
-[DvTP-toestemmingsflow](consent-flow.md), met één verschil: niet de peer van
-de dienstverlener verbindt met de bron, maar die van een softwarepartij die in
-opdracht van de dienstverlener werkt.
+dienstverlener. Het is de bestaande [DvTP-toestemmingsflow](consent-flow.md),
+met één verschil: niet de peer van de dienstverlener verbindt met de bron, maar
+die van een softwarepartij die in opdracht van de dienstverlener werkt.
 
 De functionele eisen voor DvTP behandelen zo'n integrator als verwerker van de
 dienstverlener: hij mag de gegevens inzien en omzetten voor zover de opdracht
@@ -14,13 +13,13 @@ toestemmingsportaal toont hem daarom niet meer.
 
 ## Componenten
 
-| Component | Rol |
-|---|---|
-| integrator-peer `…1100` | eigen FSC-deelnemer (`int-*` in `fsc-infra`), met alleen een Outway |
-| `integrator-backend` (9423) | `dienstverlener-backend` via `int-outway`: dezelfde inkomensvraag, met het consent van Hypotheek-BV |
-| DelegatedServiceConnectionGrant | contract tussen integrator (delegatee), Hypotheek-BV (delegator) en BD (bron) |
-| DvTP-toelatingsregister | `integrations`: integrator `…1100` handelt voor `…0300` in `DVT0001` |
-| policy | consent aan de vertegenwoordigde partij, mandaat voor de handelende partij |
+| Component                       | Rol                                                                                                 |
+| ------------------------------- | --------------------------------------------------------------------------------------------------- |
+| integrator-peer `…1100`         | eigen FSC-deelnemer (`int-*` in `fsc-infra`), met alleen een Outway                                 |
+| `integrator-backend` (9423)     | `dienstverlener-backend` via `int-outway`: dezelfde inkomensvraag, met het consent van Hypotheek-BV |
+| DelegatedServiceConnectionGrant | contract tussen integrator (delegatee), Hypotheek-BV (delegator) en BD (bron)                       |
+| DvTP-toelatingsregister         | `integrations`: integrator `…1100` handelt voor `…0300` in `DVT0001`                                |
+| policy                          | consent aan de vertegenwoordigde partij, mandaat voor de handelende partij                          |
 
 ## Flow
 
@@ -50,19 +49,18 @@ sequenceDiagram
 `dienstverlener_oin` wordt vergeleken met de **vertegenwoordigde** partij: de
 delegator uit de gedelegeerde verbinding, en bij een directe aanroep
 `subject.id` zoals voorheen. De integrator komt aan zijn bevoegdheid via een
-eigen mandaat, niet via het consent: de engine
-(`INTEGRATOR_NOT_REGISTERED`) eist dat de verbindende peer in het
-toelatingsregister actief is en voor die dienstverlener en die regel mag
-handelen. Dat geldt voor elke regel, ook als de regel het zelf niet noemt, en
-ook bij regels zonder consent. De binding wordt dus niet opgerekt: een integrator kan
-geen consent gebruiken dat aan een andere dienstverlener of aan hemzelf is
-gegeven (`CONSENT_ACTOR_MISMATCH`).
+eigen mandaat, niet via het consent: de engine (`INTEGRATOR_NOT_REGISTERED`)
+eist dat de verbindende peer in het toelatingsregister actief is en voor die
+dienstverlener en die regel mag handelen. Dat geldt voor elke regel, ook als de
+regel het zelf niet noemt, en ook bij regels zonder consent. De binding wordt
+dus niet opgerekt: een integrator kan geen consent gebruiken dat aan een andere
+dienstverlener of aan hemzelf is gegeven (`CONSENT_ACTOR_MISMATCH`).
 
-OpenFSC vult de claims anders dan de FSC-spec doet vermoeden. De
-Manager van de bron (v2.4.0, `get_token_info.sql`) zet de **delegator** in
-`act.sub` en de verbindende peer in `sub`. Dat is het omgekeerde van RFC 8693,
-waar `act` de handelende partij noemt. De policy leest de claim niet zelf maar
-het AuthZEN-veld dat de Inway ervan maakt,
+OpenFSC vult de claims anders dan de FSC-spec doet vermoeden. De Manager van de
+bron (v2.4.0, `get_token_info.sql`) zet de **delegator** in `act.sub` en de
+verbindende peer in `sub`. Dat is het omgekeerde van RFC 8693, waar `act` de
+handelende partij noemt. De policy leest de claim niet zelf maar het
+AuthZEN-veld dat de Inway ervan maakt,
 `subject.attributes.outway_delegator_peer_id`. Die naam zegt wat het is, en
 blijft kloppen als OpenFSC de claim later rechttrekt.
 
@@ -72,19 +70,19 @@ betrouwbaar als `subject.id`.
 
 ### 2. Autorisatie-input
 
-Ja. De Inway geeft de hele tokeninhoud door als `subject.properties`, en
-OpenFTV zet die in OPA-input onder `input.subject.attributes`: de delegator,
-maar ook `service_name`, `grant_hash` en `service_peer_id`. De policy leest de
-twee rollen apart:
+Ja. De Inway geeft de hele tokeninhoud door als `subject.properties`, en OpenFTV
+zet die in OPA-input onder `input.subject.attributes`: de delegator, maar ook
+`service_name`, `grant_hash` en `service_peer_id`. De policy leest de twee
+rollen apart:
 
 - `lib.acting_party`: `subject.id`, de peer die verbindt;
 - `lib.represented_party`: de delegator, of `subject.id` bij een directe
   aanroep.
 
-Een delegator die gelijk is aan de verbindende peer telt als directe aanroep.
-De EUDI-regels blijven de verbindende peer controleren tegen de aangewezen
-uitgevers (`designated_issuers` in `rules/eudi/eudi_helper.rego`). Weglaten van het
-consent-token helpt een integrator dus niet: dan valt hij onder het
+Een delegator die gelijk is aan de verbindende peer telt als directe aanroep. De
+EUDI-regels blijven de verbindende peer controleren tegen de aangewezen
+uitgevers (`designated_issuers` in `rules/eudi/eudi_helper.rego`). Weglaten van
+het consent-token helpt een integrator dus niet: dan valt hij onder het
 PID-regime en daar staat hij niet tussen de aangewezen uitgevers.
 
 ### 3. Toelating
@@ -99,8 +97,8 @@ bron binnen met drie peer-ID's en `grant_types: [3]`, zonder grantdata.
   andere mag handelen; anders `DELEGATION_NOT_REGISTERED`.
 
 Welke van de twee de delegator is, ziet de autosign niet. Een contract dat
-andersom is getekend (Hypotheek-BV als delegatee namens de integrator) wordt
-dus toegelaten. Bij de eerste aanroep weigert de policy het alsnog, omdat de
+andersom is getekend (Hypotheek-BV als delegatee namens de integrator) wordt dus
+toegelaten. Bij de eerste aanroep weigert de policy het alsnog, omdat de
 richting dan wél in het token staat. Toelating per dienst of use case kan pas
 als OpenFSC de grantdata in de autosign-input meestuurt.
 
@@ -115,46 +113,47 @@ deploymentconfiguratie:
  "rules": ["DVT0001"]}
 ```
 
-De use case is de policyregel. Dat past bij het model van de engine, waarin
-de regel de catalogus is ("model C"). Het register levert elke integratie aan
+De use case is de policyregel. Dat past bij het model van de engine, waarin de
+regel de catalogus is ("model C"). Het register levert elke integratie aan
 OpenFTV als `acts_for` op de entry van de integrator. De autosign en de
 request-policy lezen hetzelfde feed.
 
-Het contract alleen is niet genoeg. Het zegt dat drie partijen mogen
-verbinden, maar niet voor welke regel, en het blijft geldig nadat een
-integrator is geschorst. Het register wordt per aanroep gelezen: schorsen of
-een mandaat intrekken werkt binnen één PIP-interval.
+Het contract alleen is niet genoeg. Het zegt dat drie partijen mogen verbinden,
+maar niet voor welke regel, en het blijft geldig nadat een integrator is
+geschorst. Het register wordt per aanroep gelezen: schorsen of een mandaat
+intrekken werkt binnen één PIP-interval.
 
-De integratie staat nog in configuratie en niet in de beheer-UI. Dat is
-bewust klein gehouden. Een integratie laat ook niemand toe: integrator en
+De integratie staat nog in configuratie en niet in de beheer-UI. Dat is bewust
+klein gehouden. Een integratie laat ook niemand toe: integrator en
 dienstverlener hebben elk een eigen actieve entry nodig.
 
 ### 5. Logging
 
-- **LDV bij de bron:** `bron-sidecar` en `graphql-server` leggen de
-  integrator vast als `foreignOperation.processor`
+- **LDV bij de bron:** `bron-sidecar` en `graphql-server` leggen de integrator
+  vast als `foreignOperation.processor`
   (`https://fsc.gbo.overheid.nl/peers/…1100`), want `ForeignProcessor` leest
   `sub`. De dienstverlener staat níet in het record; LDV heeft geen veld voor
   "namens".
 - **LDV bij de afnemer:** `integrator-backend` schrijft in het logboek van
-  Hypotheek-BV, met `nextLogbookId` naar de bron. De verwerkingsverantwoordelijke
-  is dus Hypotheek-BV; de integrator bewaart zelf niets.
+  Hypotheek-BV, met `nextLogbookId` naar de bron. De
+  verwerkingsverantwoordelijke is dus Hypotheek-BV; de integrator bewaart zelf
+  niets.
 - **FSC-transactielog van de bron:** legt beide rollen vast,
   `delegated_src_outway_peer_id=…1100` en
   `delegated_src_delegator_peer_id=…0300`.
 - **ADL:** de AuthZEN-request, inclusief `subject.attributes`, en dus ook de
   delegator.
 
-Wie aan de bronkant wil weten namens wie een verwerker vroeg, vindt dat via
-de FSC-transactielog of de trace naar het logboek van de afnemer, niet in het
-eigen LDV-record. Als dat eigen record het moet tonen, is het een aanpassing
-in `ldv-client` (bijvoorbeeld `act.sub` meenemen) en een vraag voor de
+Wie aan de bronkant wil weten namens wie een verwerker vroeg, vindt dat via de
+FSC-transactielog of de trace naar het logboek van de afnemer, niet in het eigen
+LDV-record. Als dat eigen record het moet tonen, is het een aanpassing in
+`ldv-client` (bijvoorbeeld `act.sub` meenemen) en een vraag voor de
 LDV-standaard.
 
 ## Upstream-bevindingen
 
-- **Autosign zonder grantdata:** de autosign-input heeft geen grantdata, dus geen richting van de
-  delegatie en geen dienst.
+- **Autosign zonder grantdata:** de autosign-input heeft geen grantdata, dus
+  geen richting van de delegatie en geen dienst.
 - **`act.sub` is de delegator:** OpenFSC wijkt af van RFC 8693. Voor de demo
   maakt dat niet uit (zie vraag 1), maar het verdient een issue bij OpenFSC.
 - **Delegator tekent handmatig:** de Manager van Hypotheek-BV heeft geen
@@ -166,11 +165,11 @@ LDV-standaard.
 ## Lokaal testen
 
 De demo gebruikt standaard de directe route: Hypotheek-BV verbindt zelf. De
-integrator is opt-in. Start eerst `make demo-dvtp` of `make demo-full` en
-daarna `make demo-integrator`. Dat maakt de integrator-peer aan (compose-profiel
+integrator is opt-in. Start eerst `make demo-dvtp` of `make demo-full` en daarna
+`make demo-integrator`. Dat maakt de integrator-peer aan (compose-profiel
 `integrator`), seedt het gedelegeerde contract (`make fsc-seed-int`) en start
-`integrator-backend`. Het toelatingsregister kent de integrator al; zonder
-peer en contract doet die registratie niets.
+`integrator-backend`. Het toelatingsregister kent de integrator al; zonder peer
+en contract doet die registratie niets.
 
 Geef daarna consent aan Hypotheek-BV (`…0300`) en stuur de query naar
 `integrator-backend`:
@@ -187,13 +186,13 @@ curl -sS -X POST localhost:9423/api/dvtp/query \
   -d "{\"consent_token\":\"$token\",\"belastingjaren\":[2025]}"
 ```
 
-| Situatie | Uitkomst |
-|---|---|
-| consent aan Hypotheek-BV, integrator gemandateerd voor DVT0001 | ALLOW |
-| consent aan een andere dienstverlener | `CONSENT_ACTOR_MISMATCH` |
-| integrator alleen gemandateerd voor LVG0001 | `INTEGRATOR_NOT_REGISTERED` |
-| geen integratie in het register | `INTEGRATOR_NOT_REGISTERED`; een nieuw gedelegeerd contract blijft `proposed` met `DELEGATION_NOT_REGISTERED` |
+| Situatie                                                       | Uitkomst                                                                                                      |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| consent aan Hypotheek-BV, integrator gemandateerd voor DVT0001 | ALLOW                                                                                                         |
+| consent aan een andere dienstverlener                          | `CONSENT_ACTOR_MISMATCH`                                                                                      |
+| integrator alleen gemandateerd voor LVG0001                    | `INTEGRATOR_NOT_REGISTERED`                                                                                   |
+| geen integratie in het register                                | `INTEGRATOR_NOT_REGISTERED`; een nieuw gedelegeerd contract blijft `proposed` met `DELEGATION_NOT_REGISTERED` |
 
-De policytests dekken dezelfde gevallen voor directe en gedelegeerde
-aanroepen (`dvt0001_test.rego`, `engine_test.rego`, `lvg_engine_test.rego`,
+De policytests dekken dezelfde gevallen voor directe en gedelegeerde aanroepen
+(`dvt0001_test.rego`, `engine_test.rego`, `lvg_engine_test.rego`,
 `autosign_test.rego`).

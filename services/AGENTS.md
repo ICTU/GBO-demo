@@ -31,8 +31,8 @@ driven adapters (database, filesystem, FSC, remote APIs)
 - Do not introduce abstraction for a hypothetical future dependency. Create a
   port when there is a real I/O boundary or a real second implementation.
 
-Apply this structure when a service reaches **1,000 non-test lines of code or
-10 production source files**, whichever comes first. Apply it earlier when the
+Apply this structure when a service reaches **1,000 non-test lines of code or 10
+production source files**, whichever comes first. Apply it earlier when the
 service has any of these complexity signals:
 
 - more than one driving mechanism, such as HTTP plus a CLI or worker;
@@ -40,8 +40,8 @@ service has any of these complexity signals:
 - persistent workflow state;
 - a security, identity, authorization or trust boundary.
 
-Smaller services may remain in one package when they have one clear entry
-point and at most one external dependency. They should still keep business
-logic independent from handlers where practical. Crossing a threshold does
-not require a big-bang rewrite: establish the boundary around the next use case
-that changes, and migrate adjacent behaviour incrementally.
+Smaller services may remain in one package when they have one clear entry point
+and at most one external dependency. They should still keep business logic
+independent from handlers where practical. Crossing a threshold does not require
+a big-bang rewrite: establish the boundary around the next use case that
+changes, and migrate adjacent behaviour incrementally.
