@@ -281,9 +281,10 @@ services:
       - MANAGER_BUNDLE_CONFIGS=/bundles
       - MANAGER_INTERNAL_PORT=9443
       - MANAGER_LOG_LEVEL=info
-      # Validate the management interface's tokens. The issuer must be the
-      # URL the BROWSER used, since that is what Keycloak puts in the token;
-      # the JWKS is fetched server-side over the compose network.
+      # Validate the management interface's tokens. The issuer is the
+      # browser-facing authority, which Keycloak puts in every token as its
+      # fixed frontend URL (see the keycloak service); the JWKS is fetched
+      # server-side over the compose network.
       - MANAGER_OIDC_ISSUER=${GBO_FTV_OIDC_AUTHORITY:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYCLOAK:-9284}/realms/gbo}
       - MANAGER_OIDC_JWKS_URL=http://keycloak:8080/realms/gbo/protocol/openid-connect/certs
       - MANAGER_OIDC_AUDIENCE=openftv-manager-api
@@ -359,20 +360,24 @@ services:
   keycloak:
     profiles: [manager]
     image: quay.io/keycloak/keycloak:26.0.7
+    # Keycloak's frontend URL (KC_HOSTNAME) is the base URL without the
+    # realm path, so it is cut from the authority at start.
+    entrypoint: ["/bin/bash", "-c", "export KC_HOSTNAME=\"$${OIDC_AUTHORITY%/realms/gbo}\"; exec /opt/keycloak/bin/kc.sh \"$$@\"", "kc.sh"]
     command: ["start-dev", "--import-realm", "--http-port=8080"]
     environment:
       - KC_BOOTSTRAP_ADMIN_USERNAME=admin
       - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-}
       - FTV_MANAGER_AUDITOR_PASSWORD=${FTV_MANAGER_AUDITOR_PASSWORD:-}
       - FTV_MANAGER_DEPLOY_PASSWORD=${FTV_MANAGER_DEPLOY_PASSWORD:-}
-      # The issuer in the token must match what the browser used to reach
-      # Keycloak, or the SPA rejects it. start-dev derives it per request.
-      - KC_HOSTNAME_STRICT=false
+      # A fixed frontend URL: the browser-facing authority the UI logs in at
+      # and the Manager accepts as issuer (MANAGER_OIDC_ISSUER above). Every
+      # token carries this issuer, whichever URL the client used, so the
+      # seed script can fetch its token on localhost and the Manager can
+      # fetch the JWKS over the compose network. Behind a TLS-terminating
+      # proxy the login form posts to this https URL too, so Keycloak needs
+      # no X-Forwarded-* headers.
+      - OIDC_AUTHORITY=${GBO_FTV_OIDC_AUTHORITY:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYCLOAK:-9284}/realms/gbo}
       - KC_HTTP_ENABLED=true
-      # Behind a TLS-terminating proxy the login form would otherwise post
-      # to http:// from an https:// page, which the browser blocks as
-      # "Form is not secure". Honour the forwarded scheme instead.
-      - KC_PROXY_HEADERS=xforwarded
     volumes:
       - ./services/openftv-manager-ui/keycloak/realm-gbo.json:/opt/keycloak/data/import/realm-gbo.json:ro
     ports:
