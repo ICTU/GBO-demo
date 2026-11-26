@@ -24,7 +24,8 @@ type Client struct {
 	// http://bd-outway:8080/data-usage-index.
 	URL string
 	// LogbookID names the logbook that holds this source's records, as the
-	// source's Peer ID, a slash and a name: 99999999900000000200/bd.
+	// source's Peer ID, a slash and its FSC read service name:
+	// 99999999900000000200/ldv-lezen-bd.
 	LogbookID string
 	HTTP      *http.Client
 }

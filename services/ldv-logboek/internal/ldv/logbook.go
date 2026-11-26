@@ -128,8 +128,9 @@ func (l *Logbook) resolves(reference string) bool {
 	return ok
 }
 
-// Query selects records. Exactly one of the three axes must be set — LDV's
-// read extension is deliberately not a general query language, because a
+// Query selects records. At least one of the three axes must be set, as the
+// read extension's standard requires; axes given together narrow the result.
+// LDV's read extension is deliberately not a general query language, because a
 // logbook you can browse freely is a logbook that has become a second copy of
 // the data it describes.
 type Query struct {

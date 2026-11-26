@@ -35,7 +35,7 @@ contract.
 
 ```json
 {
-  "logbook_id": "99999999900000000200/bd",
+  "logbook_id": "99999999900000000200/ldv-lezen-bd",
   "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
   "grondslag_type": "consent",
   "grondslag_ref": "c-0b8f…"

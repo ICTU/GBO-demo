@@ -2,7 +2,7 @@
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-consent-authorization fsc-seed-ldv-lezen fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
         require-development-cas create-development-registrar-root provision-wallet-registration provision-test-pid provision-qtsp-wallet-registration credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier provision-asi-eudi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
-        demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test check-safety md-fmt md-check
+        demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test check-safety check-intent-layer md-fmt md-check
 
 -include .env
 -include fsc-infra/.env
@@ -149,6 +149,11 @@ policy-test: policy-check
 
 check-safety:
 	./scripts/check-safety.sh
+
+# Structural check of the AGENTS.md files; see docs/intent-layer.md.
+# CI runs the same script.
+check-intent-layer:
+	./scripts/intent-layer.sh check
 
 # Markdown formatting (oxfmt, 80 columns); CI runs the same script.
 md-fmt:

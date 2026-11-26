@@ -1,0 +1,38 @@
+# Boundaries (a service or frontend with its own Dockerfile, go.mod or
+# package.json) that have no AGENTS.md node yet. scripts/intent-layer.sh check
+# fails for a boundary without a node that is not listed here, and for an
+# entry here that has a node or is no longer a boundary.
+#
+# The entries below predate the Intent Layer and the list shrinks as nodes
+# are written; see docs/intent-layer.md. A new service or frontend gets its
+# node in the same pull request instead of an entry here.
+developer-portal
+dienstverlener-mock
+keyper-mock
+landing-page
+services/asi-authorization-server
+services/asi-discovery-stub
+services/asi-mapping
+services/asi-provider
+services/asi-wallet-verifier
+services/bron-sidecar
+services/brp-graphql-server
+services/bsnk-mock
+services/consent-portal-backend
+services/consent-register
+services/dev-portal-backend
+services/dienstverlener-backend
+services/dvtp-onboarding-register
+services/eudi-adapter
+services/eudi-credential-issuer
+services/eudi-issuance-server
+services/eudi-wallet-verifier
+services/ftv-graphql-mapper
+services/graphql-server
+services/lvg-graphql-server
+services/oid4vc-kit
+services/openftv-pdp
+services/qtsp-reference
+services/source-registry
+services/test-pid-source
+toestemmingsportaal-frontend
