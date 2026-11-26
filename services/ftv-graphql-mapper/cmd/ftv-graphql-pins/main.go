@@ -1,9 +1,10 @@
 // Command ftv-graphql-pins writes the Rego module that pins the digest of
-// every bundled GraphQL schema.
+// every bundled GraphQL schema, and lists the fields that return a BSN.
 //
 // The schemas travel with the PDP image, not with the policy bundle, so
 // the bundle pins them (FTV GraphQL profile, Sections 7.1 and 7.3): the
 // policy denies an evaluation whose schema digest differs from the pin.
+// The BSN fields are read by a policy test: no consent rule may cover one.
 //
 //	ftv-graphql-pins <catalog-dir> <out.rego>
 package main
@@ -11,6 +12,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	ftvgraphql "gbo-demo/ftv-graphql-mapper"
@@ -57,6 +59,29 @@ digests := {
 		}
 		fmt.Fprintf(&b, "\t%q: %q,\n", name, s.Schema.Digest)
 	}
+	b.WriteString(`}
+
+# Per service, the fields whose value is a BSN (scalar BSN), as the
+# ParentType.field keys a rule covers. A consent rule must cover none of
+# them: the consumer holds no identifier of the citizen (engine_test.rego).
+bsn_fields := {
+`)
+	for _, name := range catalog.Names() {
+		s, _ := catalog.Service(name)
+		fmt.Fprintf(&b, "\t%q: %s,\n", name, regoSet(s.Schema.FieldsOfScalar("BSN")))
+	}
 	b.WriteString("}\n")
 	return b.String(), nil
+}
+
+// regoSet writes the strings as a Rego set, set() when there are none.
+func regoSet(items []string) string {
+	if len(items) == 0 {
+		return "set()"
+	}
+	quoted := make([]string, len(items))
+	for i, item := range items {
+		quoted[i] = strconv.Quote(item)
+	}
+	return "{" + strings.Join(quoted, ", ") + "}"
 }

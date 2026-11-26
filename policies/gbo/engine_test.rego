@@ -554,6 +554,105 @@ test_regime_check_catches_a_rule_without_one if {
 	violations == {"N: names no regime", "O: names no regime"}
 }
 
+# ── Every GBO rule checks the caller itself ──────────────────────────────
+# The FSC grant admits a peer to the service, not to a rule's fields, and
+# the engine checks only an integrator's mandate. Each rule names whom it
+# grants: a PID rule its own peers (ACTOR_NOT_ALLOWED), a consent rule the
+# provider the citizen consented to (CONSENT_ACTOR_MISMATCH). Asked in its
+# own regime by a peer it does not know, under a consent given to another
+# provider, every rule refuses for that reason.
+
+_stranger := "99999999900000009999"
+
+_stranger_call := fx.request(_stranger, "bri", [fx.person("999991772")], {})
+
+_refuses_a_stranger(rid, "pid") if {
+	rules := gbo._rule_meta with input as _stranger_call
+	"ACTOR_NOT_ALLOWED" in rules[rid].deny
+}
+
+_refuses_a_stranger(rid, "consent") if {
+	rules := gbo._rule_meta with input as _stranger_call with data.gbo.consent.resolved as _consent
+	"CONSENT_ACTOR_MISMATCH" in rules[rid].deny
+}
+
+_actor_violations contains sprintf("%s: does not refuse a caller it does not know", [rid]) if {
+	some rid, m in gbo._rule_meta
+	not _refuses_a_stranger(rid, m.regime)
+}
+
+test_every_rule_checks_the_actor if {
+	violations := _actor_violations
+	print("rules without an actor check:", violations)
+	count(violations) == 0
+}
+
+# Another reason to refuse is no actor check, nor is the other regime's.
+test_actor_check_catches_a_rule_without_one if {
+	broken := {"test": {
+		"pid": {"rule_id": "P", "regime": "pid", "services": {"brp"}, "covers_fields": set(), "deny": {"ACTOR_NOT_ALLOWED"}},
+		"open": {"rule_id": "O", "regime": "pid", "services": {"brp"}, "covers_fields": set(), "deny": {"PID_NOT_PRESENT"}},
+		"consent": {"rule_id": "C", "regime": "consent", "services": {"bri"}, "covers_fields": set(), "deny": {"CONSENT_ACTOR_MISMATCH"}},
+		"peers": {"rule_id": "Q", "regime": "consent", "services": {"bri"}, "covers_fields": set(), "deny": {"ACTOR_NOT_ALLOWED"}},
+	}}
+	violations := _actor_violations with data.gbo.rules as broken
+	violations == {"O: does not refuse a caller it does not know", "Q: does not refuse a caller it does not know"}
+}
+
+# ── No consent rule covers a field that returns the BSN ──────────────────
+# Under consent the consumer holds no identifier of the citizen: its query
+# names the subject with a placeholder, and the source puts in the BSN. A
+# consent rule covering a BSN field would hand it the BSN after all. The
+# BSN fields are generated from the bundled schemas (graphql_schemas.rego).
+# Keys are not scoped per service, so the BSN fields of every schema count.
+# A rule covering a type with a BSN field covers that field too, and a rule
+# naming no regime binds under consent as well.
+
+_bsn_fields := {key | some keys in data.gbo.graphql_schemas.bsn_fields; some key in keys}
+
+_bsn_types := {split(key, ".")[0] | some key in _bsn_fields}
+
+_bsn_violations contains sprintf("%s: covers %s", [rid, key]) if {
+	some rid, m in gbo._rule_meta
+	m.regime != "pid"
+	some key in m.covers_fields
+	key in _bsn_fields
+}
+
+_bsn_violations contains sprintf("%s: covers type %s, which has a BSN field", [rid, t]) if {
+	some rid, m in gbo._rule_meta
+	m.regime != "pid"
+	some t in m.covers_types
+	t in _bsn_types
+}
+
+test_no_consent_rule_covers_a_bsn_field if {
+	violations := _bsn_violations
+	print("consent rules covering a BSN field:", violations)
+	count(violations) == 0
+}
+
+# Without BSN fields the check above would pass on anything.
+test_the_schemas_have_bsn_fields if {
+	{"IngeschrevenPersoon.bsn", "Ingezetene.bsn", "NietIngezetene.bsn"} == _bsn_fields
+}
+
+# The PID regime may cover the BSN: there the caller named the citizen.
+test_bsn_check_catches_a_consent_rule_covering_one if {
+	broken := {"test": {
+		"field": {"rule_id": "F", "regime": "consent", "services": {"bri"}, "covers_fields": {"Query.ingeschrevenPersoon", "IngeschrevenPersoon.bsn"}},
+		"type": {"rule_id": "T", "regime": "consent", "services": {"brp"}, "covers_types": {"Ingezetene"}, "covers_fields": set()},
+		"none": {"rule_id": "N", "services": {"brp"}, "covers_fields": {"NietIngezetene.bsn"}},
+		"pid": {"rule_id": "P", "regime": "pid", "services": {"brp"}, "covers_types": {"Ingezetene"}, "covers_fields": {"IngeschrevenPersoon.bsn"}},
+	}}
+	violations := _bsn_violations with data.gbo.rules as broken
+	violations == {
+		"F: covers IngeschrevenPersoon.bsn",
+		"T: covers type Ingezetene, which has a BSN field",
+		"N: covers NietIngezetene.bsn",
+	}
+}
+
 # ── Failed evidence gives the regime's own reason ────────────────────────
 
 test_pid_regime_without_a_subject_surfaces_pid_not_present if {
