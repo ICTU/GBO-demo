@@ -80,6 +80,18 @@ def request(
         return exc.code, exc.read()
 
 
+def local_realm() -> str:
+    """The demo's own Keycloak realm on its published port.
+
+    Keycloak issues every token under its fixed frontend URL, the issuer
+    the Manager accepts, whichever URL a client uses; so the seed asks it
+    on localhost, which this machine always reaches, even when the demo is
+    served on a public host. An empty port counts as unset, as in Compose.
+    """
+    port = os.environ.get("GBO_PORT_KEYCLOAK") or "9284"
+    return f"http://localhost:{port}/realms/gbo"
+
+
 def deployment_token(
     authority: str, client_id: str, username: str, password: str
 ) -> str:
@@ -225,10 +237,9 @@ def main() -> int:
     )
     ap.add_argument(
         "--oidc-authority",
-        default=os.environ.get(
-            "GBO_FTV_OIDC_AUTHORITY", "http://localhost:9284/realms/gbo"
-        ),
-        help="OIDC realm used for the deployment identity",
+        default=local_realm(),
+        help="OIDC realm used for the deployment identity (default: the "
+        "demo's own Keycloak on its published port)",
     )
     ap.add_argument("--oidc-client-id", default="openftv-manager-ui")
     ap.add_argument("--username", default="deployment")

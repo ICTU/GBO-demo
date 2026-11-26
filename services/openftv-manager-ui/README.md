@@ -49,3 +49,10 @@ reach `localhost` on the machine you are browsing from. The login needs a
 secure context, so off localhost serve the demo over https with
 `GBO_PUBLIC_SCHEME=https` (see "HTTPS behind a reverse proxy" in the main
 README).
+
+Keycloak runs with a fixed frontend URL: that browser-facing authority
+(`GBO_FTV_OIDC_AUTHORITY`, or derived from `GBO_PUBLIC_SCHEME`,
+`GBO_PUBLIC_HOST` and `GBO_PORT_KEYCLOAK`). Every token it issues carries
+that issuer, whichever URL a client used, and the Manager accepts only that
+issuer. So the seed script fetches its token from the local Keycloak on its
+published port, and the Docker host never needs to reach its own public URL.

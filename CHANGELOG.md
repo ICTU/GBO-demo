@@ -1266,6 +1266,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **`make demo-minimal`, `make demo-manager` and `make up` start without a
+  running FSC stack.** The base stack joins two networks of the
+  fsc-infra project as external networks, its default network and (since the
+  sidecars sit behind the Inways) `source-gateways`, and Compose refuses to
+  start while either is missing, as right after `make demo-down`. These
+  targets now create the missing ones, labelled as the fsc-infra project's,
+  so a later FSC start uses them and `make demo-down` removes them.
+- **The OpenFTV Manager seed works with a public host.** The Manager
+  accepts only tokens issued under the browser-facing authority
+  (`GBO_PUBLIC_SCHEME`, `GBO_PUBLIC_HOST`), but Keycloak put the URL each
+  client used into the token's issuer, and the seed script fetched its token
+  from `http://localhost:9284`, so every policy write got 403 (`token has
+  invalid issuer`). Keycloak now has that authority as its fixed frontend
+  URL, so every token carries the issuer the Manager accepts, and the seed
+  script asks the local Keycloak on its published port (`GBO_PORT_KEYCLOAK`).
+  Keycloak no longer derives its URLs from the request or from
+  `X-Forwarded-*` headers.
 - **The reference QTSP's end-to-end tests clean up after themselves.** They
   left the service processes they started running and a `qtsp-e2e-*`
   directory of about 30 MB (built binaries and generated keys) in the temp

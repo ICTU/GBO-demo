@@ -59,6 +59,22 @@ class SeedOpenFtvManagerTest(unittest.TestCase):
             b"grant_type=password&client_id=openftv-manager-ui&username=deployment&password=pw",
         )
 
+    def test_local_realm_follows_the_published_keycloak_port(self):
+        with mock.patch.dict(MODULE.os.environ, {"GBO_PORT_KEYCLOAK": "9384"}):
+            self.assertEqual(MODULE.local_realm(), "http://localhost:9384/realms/gbo")
+        with mock.patch.dict(MODULE.os.environ, {"GBO_PORT_KEYCLOAK": ""}):
+            self.assertEqual(MODULE.local_realm(), "http://localhost:9284/realms/gbo")
+
+    def test_local_realm_ignores_the_public_host(self):
+        env = {
+            "GBO_PUBLIC_SCHEME": "https",
+            "GBO_PUBLIC_HOST": "demo.example.org",
+            "GBO_FTV_OIDC_AUTHORITY": "https://auth.example.org/realms/gbo",
+            "GBO_PORT_KEYCLOAK": "",
+        }
+        with mock.patch.dict(MODULE.os.environ, env):
+            self.assertEqual(MODULE.local_realm(), "http://localhost:9284/realms/gbo")
+
     @mock.patch.object(MODULE, "request", return_value=(403, b"forbidden"))
     def test_prune_failure_fails_the_seed(self, _request):
         with redirect_stderr(io.StringIO()):
