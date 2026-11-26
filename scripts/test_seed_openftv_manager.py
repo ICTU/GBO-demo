@@ -45,7 +45,11 @@ class SeedOpenFtvManagerTest(unittest.TestCase):
         urlopen.return_value = Response(b'{"access_token":"jwt"}')
 
         token = MODULE.deployment_token(
-            "https://idp/realms/gbo", "openftv-manager-ui", "deployment", "pw"
+            "https://idp/realms/gbo",
+            {"X-Forwarded-Host": "demo"},
+            "openftv-manager-ui",
+            "deployment",
+            "pw",
         )
 
         request = urlopen.call_args.args[0]
@@ -58,41 +62,33 @@ class SeedOpenFtvManagerTest(unittest.TestCase):
             request.data,
             b"grant_type=password&client_id=openftv-manager-ui&username=deployment&password=pw",
         )
+        self.assertEqual(request.get_header("X-forwarded-host"), "demo")
 
-    @mock.patch.object(MODULE.urllib.request, "urlopen")
-    def test_deployment_token_via_local_realm_forwards_the_issuer(self, urlopen):
-        urlopen.return_value = Response(b'{"access_token":"jwt"}')
-
-        MODULE.deployment_token(
-            "https://demo.example.org:9284/realms/gbo",
-            "openftv-manager-ui",
-            "deployment",
-            "pw",
-            via="http://localhost:9284/realms/gbo",
-        )
-
-        request = urlopen.call_args.args[0]
+    def test_explicit_realm_is_asked_directly(self):
         self.assertEqual(
-            request.full_url,
-            "http://localhost:9284/realms/gbo/protocol/openid-connect/token",
+            MODULE.token_realm("https://idp.example.org/realms/gbo"),
+            ("https://idp.example.org/realms/gbo", {}),
         )
-        self.assertEqual(request.get_header("X-forwarded-proto"), "https")
-        self.assertEqual(request.get_header("X-forwarded-host"), "demo.example.org")
-        self.assertEqual(request.get_header("X-forwarded-port"), "9284")
 
-    def test_local_realm_only_without_explicit_authority(self):
-        with mock.patch.dict(
-            MODULE.os.environ,
-            {"GBO_PORT_KEYCLOAK": "9384", "GBO_FTV_OIDC_AUTHORITY": ""},
-        ):
-            self.assertEqual(
-                MODULE.local_realm(), "http://localhost:9384/realms/gbo"
-            )
-        with mock.patch.dict(
-            MODULE.os.environ,
-            {"GBO_FTV_OIDC_AUTHORITY": "https://idp.example.org/realms/gbo"},
-        ):
-            self.assertIsNone(MODULE.local_realm())
+    def test_derived_realm_goes_through_local_port_with_public_issuer(self):
+        env = {
+            "GBO_PUBLIC_SCHEME": "https",
+            "GBO_PUBLIC_HOST": "demo.example.org",
+            "GBO_PORT_KEYCLOAK": "9384",
+        }
+        with mock.patch.dict(MODULE.os.environ, env):
+            for explicit in (None, ""):
+                self.assertEqual(
+                    MODULE.token_realm(explicit),
+                    (
+                        "http://localhost:9384/realms/gbo",
+                        {
+                            "X-Forwarded-Proto": "https",
+                            "X-Forwarded-Host": "demo.example.org",
+                            "X-Forwarded-Port": "9384",
+                        },
+                    ),
+                )
 
     @mock.patch.object(MODULE, "request", return_value=(403, b"forbidden"))
     def test_prune_failure_fails_the_seed(self, _request):

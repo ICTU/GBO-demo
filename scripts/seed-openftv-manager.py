@@ -80,33 +80,15 @@ def request(
         return exc.code, exc.read()
 
 
-def default_authority() -> str:
+def public_authority() -> str:
     """The issuer the Manager accepts (MANAGER_OIDC_ISSUER in docker-compose.yml).
 
-    Keycloak puts the URL the client used in the token's issuer, so a token
-    requested from plain localhost is refused when the demo has a public
-    host. Empty variables count as unset, as in Compose.
+    Empty variables count as unset, as in Compose.
     """
-    explicit = os.environ.get("GBO_FTV_OIDC_AUTHORITY")
-    if explicit:
-        return explicit
     scheme = os.environ.get("GBO_PUBLIC_SCHEME") or "http"
     host = os.environ.get("GBO_PUBLIC_HOST") or "localhost"
     port = os.environ.get("GBO_PORT_KEYCLOAK") or "9284"
     return f"{scheme}://{host}:{port}/realms/gbo"
-
-
-def local_realm() -> str | None:
-    """The demo's own Keycloak on its published port, or None for an external one.
-
-    The public URL is not always reachable from the machine the demo runs
-    on (a reverse proxy may serve only the tailnet, or the network may not
-    route a host back to itself). The published port always is.
-    """
-    if os.environ.get("GBO_FTV_OIDC_AUTHORITY"):
-        return None
-    port = os.environ.get("GBO_PORT_KEYCLOAK") or "9284"
-    return f"http://localhost:{port}/realms/gbo"
 
 
 def forwarded_headers(authority: str) -> dict[str, str]:
@@ -124,18 +106,28 @@ def forwarded_headers(authority: str) -> dict[str, str]:
     }
 
 
+def token_realm(explicit: str | None) -> tuple[str, dict[str, str]]:
+    """The realm URL to ask for the deployment token, and the headers to send.
+
+    An explicit realm is asked directly. Otherwise the demo's own Keycloak
+    is asked on its published port, which is always reachable from this
+    machine (the public URL may not be), with forwarded headers so the
+    token still carries the public issuer the Manager accepts.
+    """
+    if explicit:
+        return explicit, {}
+    port = os.environ.get("GBO_PORT_KEYCLOAK") or "9284"
+    return f"http://localhost:{port}/realms/gbo", forwarded_headers(public_authority())
+
+
 def deployment_token(
-    authority: str,
+    realm: str,
+    headers: dict[str, str],
     client_id: str,
     username: str,
     password: str,
-    via: str | None = None,
 ) -> str:
-    """Get a short-lived token for the internal deployment identity.
-
-    With `via`, the request goes to that realm URL instead, with forwarded
-    headers so the token still carries `authority` as its issuer.
-    """
+    """Get a short-lived token for the internal deployment identity."""
     form = urllib.parse.urlencode(
         {
             "grant_type": "password",
@@ -144,14 +136,11 @@ def deployment_token(
             "password": password,
         }
     ).encode()
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    if via:
-        headers.update(forwarded_headers(authority))
     req = urllib.request.Request(
-        f"{(via or authority).rstrip('/')}/protocol/openid-connect/token",
+        f"{realm.rstrip('/')}/protocol/openid-connect/token",
         data=form,
         method="POST",
-        headers=headers,
+        headers={"Content-Type": "application/x-www-form-urlencoded", **headers},
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -299,16 +288,12 @@ def main() -> int:
         print("FTV_MANAGER_DEPLOY_PASSWORD is required", file=sys.stderr)
         return 1
 
-    # An explicit realm is asked directly; the derived one goes through
-    # the published port, so the seed does not depend on the public URL
-    # being reachable from this machine.
-    authority, via = args.oidc_authority, None
-    if not authority:
-        authority, via = default_authority(), local_realm()
-
+    realm, headers = token_realm(
+        args.oidc_authority or os.environ.get("GBO_FTV_OIDC_AUTHORITY")
+    )
     try:
         token = deployment_token(
-            authority, args.oidc_client_id, args.username, password, via
+            realm, headers, args.oidc_client_id, args.username, password
         )
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
