@@ -6,10 +6,6 @@
 # The entries below predate the Intent Layer and the list shrinks as nodes
 # are written; see docs/intent-layer.md. A new service or frontend gets its
 # node in the same pull request instead of an entry here.
-developer-portal
-dienstverlener-mock
-keyper-mock
-landing-page
 services/asi-authorization-server
 services/asi-discovery-stub
 services/asi-mapping
@@ -18,7 +14,6 @@ services/asi-wallet-verifier
 services/bsnk-mock
 services/consent-portal-backend
 services/consent-register
-services/dev-portal-backend
 services/dienstverlener-backend
 services/dvtp-onboarding-register
 services/eudi-adapter
