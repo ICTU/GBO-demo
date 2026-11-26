@@ -10,9 +10,10 @@
 
      Always show before and after, in the form that fits:
      - UI change: screenshots side by side.
-     - Behaviour, flow or state change: a Mermaid diagram of the old and the new
-       situation (sequenceDiagram for flows between services, stateDiagram-v2 for
-       state, flowchart or classDiagram for structure). GitHub and GitLab render it.
+     - Behaviour, flow, state or structure change: the old and the new situation in
+       the diagram that shows this change most clearly (e.g. sequence, state,
+       flowchart, class, ER, C4/architecture, or a table). Mermaid renders on
+       GitHub and GitLab.
      - Nothing to compare (typo, dependency bump, CI config):
        write "No visual comparison: <reason>". Don't leave it out.
 

@@ -38,9 +38,10 @@ Before opening a PR:
 3. Match the code style of the file you're editing. New Go services get the same `.golangci.yml` treatment as existing ones.
 
 4. Fill in the PR template (`.github/pull_request_template.md`). Solution always
-   shows before and after: screenshots for a UI change, Mermaid diagrams for a
-   flow or state change (a ```` ```mermaid ```` block renders on GitHub and GitLab),
-   or "No visual comparison: <reason>". Evidence is real output or a screenshot
+   shows before and after: screenshots for a UI change; for a behaviour, flow,
+   state or structure change, the diagram that shows it most clearly (e.g. sequence,
+   state, flowchart, class, ER, C4/architecture, or a table; a ```` ```mermaid ````
+   block renders on GitHub and GitLab); or "No visual comparison: <reason>". Evidence is real output or a screenshot
    proving the after state works. With gh 2.105 or newer you can
    attach a screenshot from the command line:
    `gh pr create --attach './after.png#After'` (also works with `gh pr edit`).
