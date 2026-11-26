@@ -45,8 +45,9 @@ versions what it produced.
 a PostgreSQL 16. Locally:
 
 ```bash
-docker run -d --rm --name registrytest -e POSTGRES_PASSWORD=registrytest -p 55432:5432 postgres:16-alpine
-SOURCE_REGISTRY_TEST_DATABASE_URL="postgres://postgres:registrytest@127.0.0.1:55432/postgres?sslmode=disable" \
+export SOURCE_REGISTRY_TEST_PASSWORD=registrytest
+docker run -d --rm --name registrytest -e POSTGRES_PASSWORD="${SOURCE_REGISTRY_TEST_PASSWORD}" -p 55432:5432 postgres:16-alpine
+SOURCE_REGISTRY_TEST_DATABASE_URL="postgres://postgres:${SOURCE_REGISTRY_TEST_PASSWORD}@127.0.0.1:55432/postgres?sslmode=disable" \
   go test -count=1 ./postgresregistry
 ```
 
