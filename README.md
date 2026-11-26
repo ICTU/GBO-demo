@@ -467,8 +467,12 @@ purpose from the registration) and binds it to the citizen;
 answers with the return URL the browser goes to: with `code` and `state`, or
 with `error=access_denied` or `error=server_error` and `state`. The provider
 exchanges the code over FSC at `POST /token` on the same FSC service, with the
-PKCE `code_verifier`, for the consent token (`access_token`). A code works once
-and for 60 seconds.
+PKCE `code_verifier`, for the consent token (`access_token`), its
+`expires_in` and a `refresh_token`. A code works once and for 60 seconds. With
+`grant_type=refresh_token` on the same endpoint the provider gets a new consent
+token for the same consent, without the citizen, until the consent is revoked
+or ends; the refresh token is bound to the provider's FSC peer and is not
+rotated.
 
 The provider backends (`dienstverlener-backend`, `ir-backend`) do this on the
 provider's side: `POST /api/consent/start` pushes the request and answers with

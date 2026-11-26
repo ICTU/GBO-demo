@@ -18,8 +18,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   after `valid_until` is refused. The internal `POST /proofs/refresh` signs a
   new proof of the same consent; the refresh token is not rotated and stays
   usable until `valid_until`. Each refresh is logged as
-  `gbo-toestemmingsbewijs-vernieuwen`. The portal's token endpoint does not
-  offer the refresh grant yet.
+  `gbo-toestemmingsbewijs-vernieuwen`.
+- **Refresh grant on the consent portal's token endpoint** (#647). A decision
+  in the pushed authorization flow names the client's FSC peer, so the
+  register gives a refresh token bound to it. `POST /token` now answers the
+  code exchange with `expires_in` and `refresh_token`, and accepts
+  `grant_type=refresh_token` from the same FSC peer: a new consent token of the
+  same consent with `expires_in` and no new refresh token (it is not rotated).
+  A revoked or ended consent, an unknown token or another peer gives
+  `invalid_grant`; a scope that is not the whole consent gives
+  `invalid_scope`.
 - **Consent flow with a pushed authorization request** (#427, #648): a
   service provider pushes its consent request to the consent portal over FSC
   (RFC 9126), the citizen decides in the toestemmingsportaal, and the
