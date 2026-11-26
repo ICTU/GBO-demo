@@ -42,6 +42,10 @@ Before opening a PR:
    make md-check
    ```
 
+   Commits that only reformat are listed in `.git-blame-ignore-revs`; run
+   `git config blame.ignoreRevsFile .git-blame-ignore-revs` once so `git blame`
+   skips them.
+
 2. Keep the demo runnable end-to-end (`make demo` must still work).
 
 3. Match the code style of the file you're editing. New Go services get the same
