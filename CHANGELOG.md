@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Batch size per source and per attestation type** (#745): the own
+  credential issuer publishes `batch_credential_issuance` per provider and,
+  per credential configuration, a `credential_reuse_policy` (`arf_annex_ii`,
+  `once_only` only; ETSI TS 119 472-3 clause 4.2.4) on the profiles that
+  serve the EUDI wallets. A credential request is held to the batch size in
+  force at that request: the policy's for an EUDI wallet, the provider's
+  otherwise; more keys are refused with `invalid_proof`. The core reads the
+  settings through a `Settings` port; the configured settings are the
+  default. The demo changes them at runtime through `/demo/settings` on the
+  internal API (`internal/democontrol`), in memory.
 - **Consent flow with a pushed authorization request** (#427, #648): a
   service provider pushes its consent request to the consent portal over FSC
   (RFC 9126), the citizen decides in the toestemmingsportaal, and the

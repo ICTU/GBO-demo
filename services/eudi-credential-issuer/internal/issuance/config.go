@@ -184,10 +184,15 @@ type Config struct {
 	Profiles       []Profile
 	Configurations []CredentialConfiguration
 	StatusListSize int
-	BatchSize      int
-	OfferTTL       time.Duration
-	TokenTTL       time.Duration
-	NonceTTL       time.Duration
+	// BatchSize is the batch size of every provider, unless Settings say
+	// otherwise.
+	BatchSize int
+	// Settings supply the batch settings in force; without them,
+	// ConfiguredSettings.
+	Settings Settings
+	OfferTTL time.Duration
+	TokenTTL time.Duration
+	NonceTTL time.Duration
 	// DisclosureOffers, PIDAnchors and FetchPIDStatus serve
 	// disclosure-based issuance: the PID issuers whose PIDs are accepted
 	// and how their status lists are fetched.
