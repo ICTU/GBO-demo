@@ -740,6 +740,9 @@ services:
       - CONSENT_STORE=memory
       - CONSENT_TOKEN_ISSUER=https://consent-register.gbo.test
       - CONSENT_TOKEN_AUDIENCE=gbo:dvtp:pdp
+      # How long one consent token is valid, as a duration such as 5m.
+      # Empty: until its consent ends. The client refreshes a shorter one.
+      - CONSENT_PROOF_LIFETIME=${CONSENT_PROOF_LIFETIME:-}
       # The status lookup's own listener, published as the FSC service
       # consent-status through cr-inway (#383). It serves nothing else, and
       # it trusts the Fsc-Authorization header the Inway forwards — in the

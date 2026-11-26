@@ -30,12 +30,17 @@ const (
 	// Reading the logbooks of the sources to show a consent's uses (#687):
 	// an activity of its own, apart from viewing the consent.
 	consentUsageReadActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-gebruik-lezen/v1"
+	// Signing a new proof for a consent on a refresh (#647), for the client
+	// peer that refreshed.
+	consentProofRefreshActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemmingsbewijs-vernieuwen/v1"
 
-	// The portal-scoped subject reference. The register holds nothing else:
-	// no BSN, and deliberately no encrypted value either — those travel only
-	// inside the signed consent token, so the reference that names a
-	// Betrokkene here is not one the source chain works with. `data_subject_id_type` is what
-	// makes that difference explicit rather than confusing (REQ-72).
+	// The portal-scoped subject reference names the Betrokkene here. The
+	// register holds no BSN. It keeps the encrypted values per source only
+	// for a consent that can be refreshed, only while that consent runs, and
+	// cannot read them; it never names a Betrokkene by them. So the reference
+	// that names a Betrokkene here is not one the source chain works with.
+	// `data_subject_id_type` is what makes that difference explicit rather
+	// than confusing (REQ-72).
 	ldvSubjectTypePortalSubject = "portal-subject"
 )
 
@@ -67,6 +72,21 @@ func (l *registerLogbook) buildRecord(
 	status int,
 	extra map[string]any,
 ) ([]byte, error) {
+	if l == nil {
+		return nil, nil
+	}
+	return l.buildRecordFor(r, l.ForeignProcessor(r), activity, name, subjectRef, start, status, extra)
+}
+
+// buildRecordFor is buildRecord with the processor named by the caller, for
+// a processing on behalf of a peer that did not call this register itself.
+func (l *registerLogbook) buildRecordFor(
+	r *http.Request,
+	processor, activity, name, subjectRef string,
+	start time.Time,
+	status int,
+	extra map[string]any,
+) ([]byte, error) {
 	if l == nil || subjectRef == "" {
 		return nil, nil
 	}
@@ -82,7 +102,7 @@ func (l *registerLogbook) buildRecord(
 		Resource:     l.Resource(),
 		Attributes: ldv.Attributes(
 			activity, subjectRef, ldvSubjectTypePortalSubject,
-			l.ForeignProcessor(r), extra,
+			processor, extra,
 		),
 	}
 	encoded, err := json.Marshal(record)

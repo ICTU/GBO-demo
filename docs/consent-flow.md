@@ -59,10 +59,12 @@ Het consent-token noemt de burger alleen in versleutelde waarden per bron: een
 pseudoniem voor elke bron en een identiteit voor een bron op de
 Autorisatielijst BSN. BSNk maakt ze voor het OIN van die bron, en alleen die
 bron kan ze ontsleutelen. De dienstverlener krijgt geen identificator van de
-burger. Het consent-register bewaart die waarden niet; ze worden tijdens het
-aanmaken van het token kortstondig verwerkt. Voor burgergerichte listing en
-ownership gebruikt het register een afzonderlijke, portaalgebonden
-`subject_ref`.
+burger. Het consent-register kan die waarden niet lezen. Het bewaart ze alleen
+bij een toestemming die vernieuwd kan worden (zie [Looptijd van het token en
+vernieuwen](#looptijd-van-het-token-en-vernieuwen)), en alleen zolang die
+toestemming loopt; geen antwoord van het register bevat ze, behalve binnen
+een ondertekend token. Voor burgergerichte listing en ownership gebruikt het
+register een afzonderlijke, portaalgebonden `subject_ref`.
 
 Die `subject_ref` leidt het portaal zelf af: een HMAC van het BSN met een
 geheime sleutel van het portaal (`SUBJECT_REF_KEY`). Hetzelfde BSN geeft altijd
@@ -239,6 +241,42 @@ Het token bevat de bindings waarop de PDP later beslist:
 - scopes en optionele veldselecties;
 - `dienstverlener_oin`;
 - issuer, audience en geldigheid via `iat`, `nbf`, `exp` en `valid_until`.
+
+### Looptijd van het token en vernieuwen
+
+`valid_until` is het einde van de toestemming. `exp` is het einde van dit ene
+token: het vroegste van nu plus `CONSENT_PROOF_LIFETIME` (een duration zoals
+`5m`) en `valid_until`. Zonder `CONSENT_PROOF_LIFETIME`, zoals nu in de demo,
+is `exp` gelijk aan `valid_until`. Het register geeft `exp` ook als
+`expires_at` terug, zodat de aanroeper het token niet hoeft te parsen.
+
+Noemt `POST /consents` een `client_peer` (de FSC-peer van de client die het
+pushed request deed), dan geeft het register ook een refresh token: 32
+willekeurige bytes, base64url. Het register bewaart daarvan alleen de
+SHA-256, met de peer en de versleutelde waarden per bron. Met dat token haalt
+de client via het interne endpoint `POST /proofs/refresh` van het register
+(`refresh_token`, `client_peer` en optioneel `scope`) een nieuw token voor
+dezelfde toestemming, met dezelfde waarden en een nieuwe `jti`. Het refresh
+token wordt niet geroteerd: één token per toestemming, gebonden aan de peer,
+herbruikbaar tot `valid_until`. Geweigerd met `invalid_grant` worden een
+onbekend token, een andere peer, een ingetrokken en een verlopen toestemming;
+een `scope` die niet de hele toestemming is, met `invalid_scope`. Elk nieuw
+token is een verwerking `gbo-toestemmingsbewijs-vernieuwen` voor de client;
+lukt het vastleggen niet, dan geeft het register geen token (`server_error`).
+Een intrekking wist de waarden en de hash in dezelfde transactie als de
+statuswijziging; de eerste geweigerde refresh na `valid_until` wist ze ook.
+Het token endpoint van het portaal biedt de refresh grant nog niet aan; de
+directe developer-API geeft geen `client_peer` mee en krijgt dus geen refresh
+token.
+
+Intrekken werkt al bij de eerstvolgende vraag, omdat de PDP de status bij
+elke vraag ophaalt; die controle blijft ook met korte tokens nodig.
+
+Demo shortcuts: `POST /proofs/refresh` is, net als `POST /consents`, zonder
+authenticatie bereikbaar op het `backend`-netwerk; een echte uitrol beperkt
+het tot de portal-backend. Een verlopen toestemming waarvoor geen refresh meer
+komt, houdt haar waarden tot ze wordt opgeruimd; een echte uitrol ruimt
+verlopen toestemmingen periodiek op.
 
 De bestaande API-veldnaam `dienstverlener_oin` bevat in deze flow de FSC Peer
 ID waarmee de PDP de token aan `subject.id` bindt, of, als een integrator

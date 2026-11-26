@@ -133,8 +133,8 @@ func grant(t *testing.T, url string) string {
 }
 
 // Recording a consent is a Dataverwerking of the voorziening, named by the
-// portal-scoped reference the register stores — never an encrypted value,
-// which exists here only inside the signed token.
+// portal-scoped reference the register stores — never by an encrypted value,
+// which the register cannot read.
 func TestGrantingAConsentIsLogged(t *testing.T) {
 	logbook := ldvtest.New(t, allGBOActivities()...)
 	url, store, client := registerUnderTest(t, logbook)

@@ -48,6 +48,17 @@ ALTER TABLE consents DROP COLUMN IF EXISTS pi;
 CREATE INDEX IF NOT EXISTS consents_subject_ref_status_idx
     ON consents (subject_ref, status);
 
+-- What a consent keeps for a refresh (package refresh): the encrypted values
+-- per party that its first proof carried, the SHA-256 of its refresh token and
+-- the FSC peer of the client the token was issued to. Only for a consent given
+-- with a client peer, and only while it runs: revoking wipes the values and
+-- the hash, and so does the first refresh refused after valid_until.
+ALTER TABLE consents ADD COLUMN IF NOT EXISTS encrypted_subject jsonb;
+ALTER TABLE consents ADD COLUMN IF NOT EXISTS refresh_token_hash bytea;
+ALTER TABLE consents ADD COLUMN IF NOT EXISTS client_peer text NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS consents_refresh_token_hash_idx
+    ON consents (refresh_token_hash) WHERE refresh_token_hash IS NOT NULL;
+
 -- The polymorphic values the portal got when it activated a citizen, under
 -- the portal's reference to that citizen. Apart from the consents: no consent
 -- query reads them.
@@ -155,9 +166,12 @@ func (s *PostgreSQLStore) Create(ctx context.Context, consent *Consent, record [
 			scope_entries,
 			use_case,
 			created_at,
-			valid_until
+			valid_until,
+			encrypted_subject,
+			refresh_token_hash,
+			client_peer
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`,
 		consent.ConsentID,
 		consent.Status,
@@ -168,6 +182,9 @@ func (s *PostgreSQLStore) Create(ctx context.Context, consent *Consent, record [
 		consent.UseCase,
 		consent.CreatedAt,
 		consent.ValidUntil,
+		nullJSON(consent.EncryptedSubject),
+		consent.RefreshTokenHash,
+		consent.ClientPeer,
 	)
 	if err != nil {
 		return fmt.Errorf("insert consent: %w", err)
@@ -179,6 +196,14 @@ func (s *PostgreSQLStore) Create(ctx context.Context, consent *Consent, record [
 		return fmt.Errorf("commit consent and its record: %w", err)
 	}
 	return nil
+}
+
+// nullJSON stores no values as SQL NULL rather than as a JSON null.
+func nullJSON(value []byte) any {
+	if len(value) == 0 {
+		return nil
+	}
+	return string(value)
 }
 
 // appendOutbox writes the LDV record inside whatever transaction it is given.
@@ -308,7 +333,7 @@ func (s *PostgreSQLStore) Revoke(ctx context.Context, consentID string, record f
 
 	consent, err := scanConsent(transaction.QueryRow(ctx, `
 		UPDATE consents
-		SET status = 'REVOKED'
+		SET status = 'REVOKED', encrypted_subject = NULL, refresh_token_hash = NULL
 		WHERE consent_id = $1
 		RETURNING
 			consent_id,
@@ -342,13 +367,60 @@ func (s *PostgreSQLStore) Revoke(ctx context.Context, consentID string, record f
 	return consent, true, nil
 }
 
-func scanConsent(row rowScanner) (*Consent, error) {
+// ByRefreshToken returns the consent whose refresh token has this SHA-256,
+// with what it keeps for a refresh.
+func (s *PostgreSQLStore) ByRefreshToken(ctx context.Context, tokenHash []byte) (*Consent, bool, error) {
+	var encryptedSubject []byte
+	var clientPeer string
+	consent, err := scanConsent(s.pool.QueryRow(ctx, `
+		SELECT
+			consent_id,
+			status,
+			subject_ref,
+			dienstverlener_oin,
+			scopes,
+			scope_entries,
+			use_case,
+			created_at,
+			valid_until,
+			encrypted_subject,
+			client_peer
+		FROM consents
+		WHERE refresh_token_hash = $1
+	`, tokenHash), &encryptedSubject, &clientPeer)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	consent.EncryptedSubject = encryptedSubject
+	consent.RefreshTokenHash = tokenHash
+	consent.ClientPeer = clientPeer
+	return consent, true, nil
+}
+
+// ForgetRefresh wipes the encrypted values and the refresh token hash of a
+// consent.
+func (s *PostgreSQLStore) ForgetRefresh(ctx context.Context, consentID string) error {
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE consents SET encrypted_subject = NULL, refresh_token_hash = NULL
+		WHERE consent_id = $1
+	`, consentID); err != nil {
+		return fmt.Errorf("forget refresh values: %w", err)
+	}
+	return nil
+}
+
+// scanConsent reads the nine columns every consent query selects, then any
+// extra ones the query adds after them.
+func scanConsent(row rowScanner, extra ...any) (*Consent, error) {
 	consent := &Consent{}
 	var subjectRef pgtype.Text
 	var scopes []byte
 	var scopeEntries []byte
 
-	err := row.Scan(
+	err := row.Scan(append([]any{
 		&consent.ConsentID,
 		&consent.Status,
 		&subjectRef,
@@ -358,7 +430,7 @@ func scanConsent(row rowScanner) (*Consent, error) {
 		&consent.UseCase,
 		&consent.CreatedAt,
 		&consent.ValidUntil,
-	)
+	}, extra...)...)
 	if err != nil {
 		return nil, fmt.Errorf("scan consent: %w", err)
 	}

@@ -227,6 +227,7 @@ GBO's own, for `logboek-toestemming` ([`verwerkingsactiviteiten-toestemming.json
 | `gbo-toestemming-intrekken/v1` | revoking a consent | `consent-register` |
 | `gbo-toestemming-status/v1` | confirming a consent's status to the PDP | `consent-register` |
 | `gbo-toestemming-inzage/v1` | showing a citizen their own consents | `consent-register` |
+| `gbo-toestemmingsbewijs-vernieuwen/v1` | signing a new proof of a running consent on a refresh, for the client that refreshed | `consent-register` |
 
 And for `logboek-eudi-adapter` ([`verwerkingsactiviteiten-eudi-adapter.json`](config/verwerkingsactiviteiten-eudi-adapter.json)):
 
@@ -515,7 +516,7 @@ because what it did was GBO's processing, not BD's.
 | `graphql-server` | bd | `bd-ib-2024`, `bd-ib-2025` | `logboek-pseudoniem` |
 | `brp-sidecar` | brp | `brp-identiteit-ontsleuteling`, `brp-bronquery-doorgifte` | `logboek-pseudoniem` |
 | `brp-graphql-server` | brp | `brp-akte-overlijden`, `brp-persoonsgegevens-verstrekking` | `logboek-pseudoniem`, `brp-persoon-id` |
-| `consent-register` | toestemming | `gbo-toestemming-verlenen`, `-intrekken`, `-status`, `-inzage` | `portal-subject` |
+| `consent-register` | toestemming | `gbo-toestemming-verlenen`, `-intrekken`, `-status`, `-inzage`, `gbo-toestemmingsbewijs-vernieuwen` | `portal-subject` |
 | `consent-portal-backend` | toestemming | `gbo-bsn-pseudonimisering` | `portal-subject` |
 | `eudi-adapter` | eudi-adapter | `gbo-pid-bsn-extractie`, `gbo-attestatie-samenstellen` | `logboek-pseudoniem` |
 

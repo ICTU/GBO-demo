@@ -432,8 +432,12 @@ private key. The key ID is `CONSENT_SIGNING_KEY_ID` when set, else the key's
 RFC 7638 JWK thumbprint, so a new key always gets a new key ID and the PDP
 fetches the JWKS again instead of verifying with a cached old key. The demo JWKS
 exposes only the current key; production rotation must retain old public keys
-until their tokens expire. Production hardening should also shorten the token
-lifetime and bind proof of possession
+until their tokens expire. `CONSENT_PROOF_LIFETIME` (a duration such as `5m`)
+bounds how long one token is valid; unset, as in the demo for now, a token is
+valid until its consent ends. A consent given for a named client peer also
+gets a refresh token, with which that client fetches a new token without the
+citizen (see [docs/consent-flow.md](docs/consent-flow.md)). Production
+hardening should also shorten the token lifetime and bind proof of possession
 to the FSC/mTLS identity (for example with a confirmation claim); the current
 explicit `dienstverlener_oin` check prevents cross-consumer use but does not
 make a stolen bearer token non-replayable by that same consumer.
