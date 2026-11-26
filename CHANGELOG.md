@@ -2,271 +2,261 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and this project adheres to
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
 ### Added
-- **Consent flow with a pushed authorization request** (#427, #648): a
-  service provider pushes its consent request to the consent portal over FSC
-  (RFC 9126), the citizen decides in the toestemmingsportaal, and the
-  provider exchanges the code it gets back for the consent token.
-  `docs/consent-flow.md` describes the flow, its reason codes and its demo
-  shortcuts.
+
+- **Consent flow with a pushed authorization request** (#427, #648): a service
+  provider pushes its consent request to the consent portal over FSC (RFC 9126),
+  the citizen decides in the toestemmingsportaal, and the provider exchanges the
+  code it gets back for the consent token. `docs/consent-flow.md` describes the
+  flow, its reason codes and its demo shortcuts.
   - **Registration.** An optional `service_providers` block in the DvTP
-    onboarding register lists per Peer ID the services a provider asks
-    consent for (each with its purpose) and its return locations (with
-    `${VAR}` expansion). `GET /internal/consent-portal/participants/{peer_id}`
-    returns a participant's name, active state, services and return
-    locations. The demo configuration registers both demo providers.
-  - **`POST /par`** on a new listener of the consent portal backend
-    (`FSC_PORT`, default 4013), published as the FSC service
-    `consent-authorization` of the consent register's peer through
-    `cr-inway`. The provider is the `sub` of the forwarded
-    `Fsc-Authorization` token (none: `401 invalid_client`). A request without
-    `response_type=code`, `state` or an S256 `code_challenge`, with a
+    onboarding register lists per Peer ID the services a provider asks consent
+    for (each with its purpose) and its return locations (with `${VAR}`
+    expansion). `GET /internal/consent-portal/participants/{peer_id}` returns a
+    participant's name, active state, services and return locations. The demo
+    configuration registers both demo providers.
+  - **`POST /par`** on a new listener of the consent portal backend (`FSC_PORT`,
+    default 4013), published as the FSC service `consent-authorization` of the
+    consent register's peer through `cr-inway`. The provider is the `sub` of the
+    forwarded `Fsc-Authorization` token (none: `401 invalid_client`). A request
+    without `response_type=code`, `state` or an S256 `code_challenge`, with a
     `valid_until` that is malformed or not later than the expiry of the new
-    `request_uri`, with a repeated parameter or a `request_uri` in the body,
-    is refused with `INITIATION_INCOMPLETE` (a body over 64 KiB: `413`).
-    Then the request is checked against the provider's registration, in
-    this order: `INITIATION_INCOMPLETE` (no client ID, service, data sets or
-    return URL), `PARTY_NOT_ACTIVE` (unknown or inactive provider, or a peer
-    ID that names no participant), `INITIATION_MISMATCH` (client ID other
-    than the calling peer, unregistered service, or a `client_name` or
-    `purpose` that differs from the registration), `UNKNOWN_SCOPE` and
-    `RETURN_URL_NOT_REGISTERED` (exact match). A register that cannot be
-    read, or answers about another participant, gives
-    `ADMISSION_REGISTER_UNAVAILABLE`. A refusal is an OAuth error with the
-    reason code in `reason`: `invalid_request`, `unauthorized_client` for
-    `PARTY_NOT_ACTIVE`, `invalid_scope` for `UNKNOWN_SCOPE`,
-    `503 temporarily_unavailable` for `ADMISSION_REGISTER_UNAVAILABLE`. An
-    accepted request lives under its `request_uri` for
-    `PAR_REQUEST_LIFETIME` (default 10 minutes). The backend reads the
-    register at `ONBOARDING_REGISTER_URL` on the `dvtp-onboarding` network;
-    `CONSENT_KNOWN_SCOPES` lists the data sets it knows (default: the three
-    the portal describes).
-  - **Resolve and decide**, on the citizen's listener behind the portal
-    login. `GET /portal/requests/{request_uri}?client_id=…` binds the
-    reference to the first citizen that resolves it and returns the
-    provider's name, service and purpose from its registration, the data
-    sets and `valid_until`. Refused, with the code in `reason`: unknown
-    (`404 REQUEST_URI_UNKNOWN`), expired (`410 REQUEST_URI_EXPIRED`), used
-    (`410 REQUEST_URI_SPENT`), another `client_id` (`400 CLIENT_ID_MISMATCH`)
-    or another citizen (`403 REQUEST_URI_OTHER_CITIZEN`). Expired and used
-    references are remembered for one more request lifetime, then they are
-    unknown. `POST /portal/requests/{request_uri}/decision` with
-    `{"decision": "grant", "scopes": [...]}` or `{"decision": "deny"}` uses
-    the reference once, only after the same citizen resolved it (otherwise
+    `request_uri`, with a repeated parameter or a `request_uri` in the body, is
+    refused with `INITIATION_INCOMPLETE` (a body over 64 KiB: `413`). Then the
+    request is checked against the provider's registration, in this order:
+    `INITIATION_INCOMPLETE` (no client ID, service, data sets or return URL),
+    `PARTY_NOT_ACTIVE` (unknown or inactive provider, or a peer ID that names no
+    participant), `INITIATION_MISMATCH` (client ID other than the calling peer,
+    unregistered service, or a `client_name` or `purpose` that differs from the
+    registration), `UNKNOWN_SCOPE` and `RETURN_URL_NOT_REGISTERED` (exact
+    match). A register that cannot be read, or answers about another
+    participant, gives `ADMISSION_REGISTER_UNAVAILABLE`. A refusal is an OAuth
+    error with the reason code in `reason`: `invalid_request`,
+    `unauthorized_client` for `PARTY_NOT_ACTIVE`, `invalid_scope` for
+    `UNKNOWN_SCOPE`, `503 temporarily_unavailable` for
+    `ADMISSION_REGISTER_UNAVAILABLE`. An accepted request lives under its
+    `request_uri` for `PAR_REQUEST_LIFETIME` (default 10 minutes). The backend
+    reads the register at `ONBOARDING_REGISTER_URL` on the `dvtp-onboarding`
+    network; `CONSENT_KNOWN_SCOPES` lists the data sets it knows (default: the
+    three the portal describes).
+  - **Resolve and decide**, on the citizen's listener behind the portal login.
+    `GET /portal/requests/{request_uri}?client_id=…` binds the reference to the
+    first citizen that resolves it and returns the provider's name, service and
+    purpose from its registration, the data sets and `valid_until`. Refused,
+    with the code in `reason`: unknown (`404 REQUEST_URI_UNKNOWN`), expired
+    (`410 REQUEST_URI_EXPIRED`), used (`410 REQUEST_URI_SPENT`), another
+    `client_id` (`400 CLIENT_ID_MISMATCH`) or another citizen
+    (`403 REQUEST_URI_OTHER_CITIZEN`). Expired and used references are
+    remembered for one more request lifetime, then they are unknown.
+    `POST /portal/requests/{request_uri}/decision` with
+    `{"decision": "grant", "scopes": [...]}` or `{"decision": "deny"}` uses the
+    reference once, only after the same citizen resolved it (otherwise
     `403 REQUEST_URI_NOT_RESOLVED`), and answers with `outcome` and a
     `redirect_to`: the return URL with `code` and `state`, with
-    `error=access_denied` (no consent) or with `error=server_error` (the
-    consent could not be given), never with the consent token. Data sets
-    outside the request, one named twice, or none answer `400` and leave the
-    reference usable. Without `valid_until` a consent holds 90 days.
+    `error=access_denied` (no consent) or with `error=server_error` (the consent
+    could not be given), never with the consent token. Data sets outside the
+    request, one named twice, or none answer `400` and leave the reference
+    usable. Without `valid_until` a consent holds 90 days.
   - **`POST /token`** on the FSC listener (`grant_type=authorization_code`,
     `code`, `redirect_uri`, `code_verifier`) gives the calling provider the
-    consent token as `access_token`, with `scope` and `consent_id`. A code
-    works once, for 60 seconds, for its own provider and redirect URI and
-    with the PKCE verifier of the pushed challenge; otherwise
-    `invalid_grant`. Another `grant_type` gives `unsupported_grant_type`, a
-    body over 64 KiB `413`. Two choices the standards leave open: a code
-    presented again after its exchange is refused, but the consent it gave is
-    not revoked (RFC 6749 §4.1.2 says SHOULD), and a failed exchange does not
-    burn the code, so that someone who sees it cannot block the provider.
-    Portal and `/token` answers carry `Cache-Control: no-store`.
+    consent token as `access_token`, with `scope` and `consent_id`. A code works
+    once, for 60 seconds, for its own provider and redirect URI and with the
+    PKCE verifier of the pushed challenge; otherwise `invalid_grant`. Another
+    `grant_type` gives `unsupported_grant_type`, a body over 64 KiB `413`. Two
+    choices the standards leave open: a code presented again after its exchange
+    is refused, but the consent it gave is not revoked (RFC 6749 §4.1.2 says
+    SHOULD), and a failed exchange does not burn the code, so that someone who
+    sees it cannot block the provider. Portal and `/token` answers carry
+    `Cache-Control: no-store`.
   - **Provider backends.** `dienstverlener-backend` and `ir-backend` get
-    `POST /api/consent/start` (`service`, `scopes`, optional `valid_until`):
-    it pushes the request through the provider's Outway with the configured
-    `client_id` and `redirect_uri`, a random `state` and an S256 PKCE
-    challenge, without `client_name` or `purpose`, and answers with a
-    `redirect_to` to the portal that carries only `client_id` and
-    `request_uri`. `POST /api/consent/complete` (`code` or `error`, with
-    `state`) checks the state, exchanges a code at `POST /token` and answers
-    with `outcome` `granted`, `denied` (`access_denied`) or `failed`, never
-    with the token. The token stays in a server-side session behind an
-    HttpOnly, `SameSite=Lax` cookie (`Secure` when the redirect URI is
-    https), with a new session id on a grant. Start, complete and a query
-    that uses the session must be `application/json` (`415`) and, when the
-    browser sends `Sec-Fetch-Site`, `same-origin` (`403`). A refusal caused
-    by the provider's own registration or configuration is `502`, one caused
-    by the request `400`. Calls to the Outway carry the trace context.
-    Configured with
-    `CONSENT_CLIENT_ID` (a Peer ID, digits only), `CONSENT_REDIRECT_URI`,
-    `CONSENT_PORTAL_URL` and `CONSENT_AUTHORIZATION_URL`; without
-    `CONSENT_CLIENT_ID` the routes are off.
-  - **Portal start route.** The toestemmingsportaal's `/toestemming/start`
-    reads only `client_id` and `request_uri`. Without a portal login the
-    start URL waits in a cookie for five minutes (`SameSite=Lax`, `Secure`
-    behind https) while the citizen logs in; a cookie that expired during
-    the login gives the error page. The consent screen shows what the backend
-    resolves and has only "Geef toestemming" and "Weiger"; after a short
-    confirmation the browser goes to the backend's `redirect_to` as it is.
-    Every refused reference, and a failed decision without a return URL,
-    shows one error page without a link or a redirect. Nothing of the
-    request is kept in web storage.
-  - **Demo setup.** `make fsc-seed-consent-authorization`, part of
-    `make demo` and `make demo-full`, connects Hypotheek-BV and the
-    Installatie Register to `consent-authorization`; the onboarding
-    register's demo configuration admits both to the consent register's
-    peer. An existing register volume lacks that admission: the seed target
-    says so, see TROUBLESHOOTING.md.
+    `POST /api/consent/start` (`service`, `scopes`, optional `valid_until`): it
+    pushes the request through the provider's Outway with the configured
+    `client_id` and `redirect_uri`, a random `state` and an S256 PKCE challenge,
+    without `client_name` or `purpose`, and answers with a `redirect_to` to the
+    portal that carries only `client_id` and `request_uri`.
+    `POST /api/consent/complete` (`code` or `error`, with `state`) checks the
+    state, exchanges a code at `POST /token` and answers with `outcome`
+    `granted`, `denied` (`access_denied`) or `failed`, never with the token. The
+    token stays in a server-side session behind an HttpOnly, `SameSite=Lax`
+    cookie (`Secure` when the redirect URI is https), with a new session id on a
+    grant. Start, complete and a query that uses the session must be
+    `application/json` (`415`) and, when the browser sends `Sec-Fetch-Site`,
+    `same-origin` (`403`). A refusal caused by the provider's own registration
+    or configuration is `502`, one caused by the request `400`. Calls to the
+    Outway carry the trace context. Configured with `CONSENT_CLIENT_ID` (a Peer
+    ID, digits only), `CONSENT_REDIRECT_URI`, `CONSENT_PORTAL_URL` and
+    `CONSENT_AUTHORIZATION_URL`; without `CONSENT_CLIENT_ID` the routes are off.
+  - **Portal start route.** The toestemmingsportaal's `/toestemming/start` reads
+    only `client_id` and `request_uri`. Without a portal login the start URL
+    waits in a cookie for five minutes (`SameSite=Lax`, `Secure` behind https)
+    while the citizen logs in; a cookie that expired during the login gives the
+    error page. The consent screen shows what the backend resolves and has only
+    "Geef toestemming" and "Weiger"; after a short confirmation the browser goes
+    to the backend's `redirect_to` as it is. Every refused reference, and a
+    failed decision without a return URL, shows one error page without a link or
+    a redirect. Nothing of the request is kept in web storage.
+  - **Demo setup.** `make fsc-seed-consent-authorization`, part of `make demo`
+    and `make demo-full`, connects Hypotheek-BV and the Installatie Register to
+    `consent-authorization`; the onboarding register's demo configuration admits
+    both to the consent register's peer. An existing register volume lacks that
+    admission: the seed target says so, see TROUBLESHOOTING.md.
   - **Demo shortcuts.** Pushed requests, codes and provider sessions live in
-    memory. A provider session lasts 12 hours from its creation, a start
-    does not extend it, and the number of sessions is not capped; the
-    browser sends each co-hosted provider's session cookie to every demo
-    frontend on the host. The FSC listener is also reachable on the compose
-    networks `fsc-infra` and `backend`, so a provider backend can call it
-    directly with another peer in the token. The portal login stays a bearer
-    token in `sessionStorage`.
+    memory. A provider session lasts 12 hours from its creation, a start does
+    not extend it, and the number of sessions is not capped; the browser sends
+    each co-hosted provider's session cookie to every demo frontend on the host.
+    The FSC listener is also reachable on the compose networks `fsc-infra` and
+    `backend`, so a provider backend can call it directly with another peer in
+    the token. The portal login stays a bearer token in `sessionStorage`.
 - **The demo runs on any host name**: the Vite frontends accept
   `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
   `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and
   `GBO_INTERNAL_BIND_ADDRESS` (default `127.0.0.1`) binds the ports without a
   login.
-- **The demo runs behind an https reverse proxy**: `GBO_PUBLIC_SCHEME`
-  (default `http`) sets the scheme of the browser-facing URLs, including
-  the OpenFTV Manager UI's API and OIDC authority, which now follow
-  `GBO_PUBLIC_HOST` too. `GBO_PUBLIC_BIND_ADDRESS` (default every interface)
-  binds the other published ports, so a proxy can serve them on the same
-  port numbers.
-- **Own credential issuer, first phase** (#614): `services/eudi-credential-issuer`
-  issues SD-JWT VCs with the Pre-Authorized Code Flow of OpenID4VCI 1.0 and
-  HAIP 1.0, for two wallet profiles: the NL Wallet (v0.6.0 contract, with its
-  preview endpoint) and wallets that require key attestation, such as the EUDI
-  reference wallet. Each source is its own Attestation Provider with its own
-  issuer identifier, certificates and status lists. It authenticates wallets
-  with a Wallet Instance Attestation, binds tokens with DPoP, signs its
-  metadata and publishes Token Status Lists. Offers are created through an internal API that fetches the
-  data from the bronpoort with the contract `eudi-adapter` already serves.
-  The protocol building blocks live in the new library `services/oid4vc-kit`.
-  The issuer is not deployed; `eudi-issuance-server` stays in place.
+- **The demo runs behind an https reverse proxy**: `GBO_PUBLIC_SCHEME` (default
+  `http`) sets the scheme of the browser-facing URLs, including the OpenFTV
+  Manager UI's API and OIDC authority, which now follow `GBO_PUBLIC_HOST` too.
+  `GBO_PUBLIC_BIND_ADDRESS` (default every interface) binds the other published
+  ports, so a proxy can serve them on the same port numbers.
+- **Own credential issuer, first phase** (#614):
+  `services/eudi-credential-issuer` issues SD-JWT VCs with the Pre-Authorized
+  Code Flow of OpenID4VCI 1.0 and HAIP 1.0, for two wallet profiles: the NL
+  Wallet (v0.6.0 contract, with its preview endpoint) and wallets that require
+  key attestation, such as the EUDI reference wallet. Each source is its own
+  Attestation Provider with its own issuer identifier, certificates and status
+  lists. It authenticates wallets with a Wallet Instance Attestation, binds
+  tokens with DPoP, signs its metadata and publishes Token Status Lists. Offers
+  are created through an internal API that fetches the data from the bronpoort
+  with the contract `eudi-adapter` already serves. The protocol building blocks
+  live in the new library `services/oid4vc-kit`. The issuer is not deployed;
+  `eudi-issuance-server` stays in place.
 - **Images for the new EUDI services** (#614, #639, #642): the image manifest
   publishes `eudi-credential-issuer`, `eudi-wallet-verifier` and
   `test-pid-source` to `ghcr.io/ictu/gbo-demo`, so an environment can deploy
   them. The materialization and runtime projection run on the existing
   `eudi-adapter` image.
 - **Wallet registration material for the own credential issuer** (#614):
-  `make create-development-registrar-root` and `make
-  provision-wallet-registration` issue per source an access certificate
+  `make create-development-registrar-root` and
+  `make provision-wallet-registration` issue per source an access certificate
   (WRPAC, organizationIdentifier `NTRNL-<KvK number>`) under the development
   reader root and a registration certificate (WRPRC, entitlement
-  `PUB_EAA_Provider`) signed under a separate development registrar root,
-  with the reader-root CRL and the WRPRC status list for a trust host. The
-  WRPRC carries its status in two forms at once: the normative form of ETSI
-  TS 119 475 (`idx` as a numeric string), which NL Wallet v0.6 requires, and
-  `status_list` with a numeric index (Annex C), which the EUDI reference
-  wallet reads.
+  `PUB_EAA_Provider`) signed under a separate development registrar root, with
+  the reader-root CRL and the WRPRC status list for a trust host. The WRPRC
+  carries its status in two forms at once: the normative form of ETSI TS 119 475
+  (`idx` as a numeric string), which NL Wallet v0.6 requires, and `status_list`
+  with a numeric index (Annex C), which the EUDI reference wallet reads.
 - **Own credential issuer in Docker Compose** (#614): opt-in profile
   `credential-issuer` runs the issuer beside `eudi-issuance-server`, with its
   own database in `postgres-eudi`, a materialization job and a static
   `trust-host` for the reader-root CRL and the WRPRC status list. The internal
   API is published on 127.0.0.1 only; tunnel routes for both public hosts are
   documented.
-- **Configuration of the own credential issuer from the Source Release**
-  (#614): `eudi-adapter materialize-credential-issuer` writes the issuer's
+- **Configuration of the own credential issuer from the Source Release** (#614):
+  `eudi-adapter materialize-credential-issuer` writes the issuer's
   configuration: per source an Attestation Provider with its certificates and
   wallet registration, per activated type a credential configuration, and the
   wallet profiles whose trusted wallet providers are mounted.
-- **Encrypted credential requests and responses in the own credential
-  issuer** (#614): the `eudi` profile publishes `credential_request_encryption`
-  and `credential_response_encryption` (ECDH-ES on P-256, A128GCM or A256GCM,
-  not required), as the EUDI reference wallet for Android requires. A wallet
-  that asks for an encrypted response must encrypt its request. `make
-  provision-wallet-registration` creates each source's request key once; run
-  it again for sources provisioned before.
-- **One issuer identifier for both wallets** (#614): the own credential
-  issuer gets a combined profile (`wallet`). Its metadata offers the `jwt`
-  proof type without key attestation, which the NL Wallet sends, and the
-  `attestation` proof type with it; only wallets of the NL wallet provider
-  may skip key attestation. One offer, one QR code, then reaches either
-  wallet. NL Wallet v0.6.0 cannot read this metadata yet (fixed in
-  nl-wallet after v0.6.0). `make provision-qtsp-wallet-registration`
-  registers the reference QTSP as a provider of the issuer (`QEAA_Provider`),
-  whose callback the issuer reaches over its own TLS certificate. The QTSP
-  compares nationalities on their code, so a mock login matches a PID.
-- **Issuer name in the wallets** (#614): the own credential issuer's
-  metadata names each provider in `display` by the organization name of its
-  access certificate, so the EUDI wallets show it instead of "Unknown". The
-  issuer refuses to start with an access certificate without one.
-- **One QR code for the QTSP statement** (#614): after an accepted result
-  the reference QTSP asks the own credential issuer for a pre-authorized
-  offer (`QTSP_ISSUER_OFFERS_URL` in `.env`, off by default; profile
-  `wallet`) and shows its QR code;
-  the citizen logged in at the QTSP already, so the wallet discloses nothing
-  more. The issuer fetches the statement from the QTSP callback by the
-  reference the offer names, which uses the result. The NL Wallet's static
-  link stays available under "NL Wallet (huidige app)" until the NL Wallet
-  reads the combined profile.
-- **Wallet choice in the developer portal** (#614): the wallet QR panel
-  offers "NL Wallet" (as before, through `eudi-issuance-server`) or
-  "EU-wallet" when the own credential issuer has a link for the offer. The
-  links come from its new public `GET /disclosure-offers`; the EU route works
-  only with the GBO test build of the EUDI reference wallet, which trusts the
-  GBO development certificates. Without the issuer the choice is hidden.
-- **Disclosure-based issuance in the own credential issuer** (#614): a
-  wallet discloses the BSN from its PID (OpenID4VP 1.0) and gets a
-  pre-authorized offer through `redirect_uri`, with a fixed link per offer
-  and wallet. The issuer verifies the PID itself (`oid4vc-kit/oid4vp`) and
-  passes the BSN to the source as a disclosure. `make
-  provision-wallet-registration` also issues a WRPRC per source for its
-  verifier role (`Service_Provider`, the `bsn` of the PID); run it again for
-  sources provisioned before, and `make provision-test-pid` too. The materializer writes a disclosure offer per
-  source offer and the trusted PID issuers: the NL pre-production CA and the
-  test PID.
+- **Encrypted credential requests and responses in the own credential issuer**
+  (#614): the `eudi` profile publishes `credential_request_encryption` and
+  `credential_response_encryption` (ECDH-ES on P-256, A128GCM or A256GCM, not
+  required), as the EUDI reference wallet for Android requires. A wallet that
+  asks for an encrypted response must encrypt its request.
+  `make provision-wallet-registration` creates each source's request key once;
+  run it again for sources provisioned before.
+- **One issuer identifier for both wallets** (#614): the own credential issuer
+  gets a combined profile (`wallet`). Its metadata offers the `jwt` proof type
+  without key attestation, which the NL Wallet sends, and the `attestation`
+  proof type with it; only wallets of the NL wallet provider may skip key
+  attestation. One offer, one QR code, then reaches either wallet. NL Wallet
+  v0.6.0 cannot read this metadata yet (fixed in nl-wallet after v0.6.0).
+  `make provision-qtsp-wallet-registration` registers the reference QTSP as a
+  provider of the issuer (`QEAA_Provider`), whose callback the issuer reaches
+  over its own TLS certificate. The QTSP compares nationalities on their code,
+  so a mock login matches a PID.
+- **Issuer name in the wallets** (#614): the own credential issuer's metadata
+  names each provider in `display` by the organization name of its access
+  certificate, so the EUDI wallets show it instead of "Unknown". The issuer
+  refuses to start with an access certificate without one.
+- **One QR code for the QTSP statement** (#614): after an accepted result the
+  reference QTSP asks the own credential issuer for a pre-authorized offer
+  (`QTSP_ISSUER_OFFERS_URL` in `.env`, off by default; profile `wallet`) and
+  shows its QR code; the citizen logged in at the QTSP already, so the wallet
+  discloses nothing more. The issuer fetches the statement from the QTSP
+  callback by the reference the offer names, which uses the result. The NL
+  Wallet's static link stays available under "NL Wallet (huidige app)" until the
+  NL Wallet reads the combined profile.
+- **Wallet choice in the developer portal** (#614): the wallet QR panel offers
+  "NL Wallet" (as before, through `eudi-issuance-server`) or "EU-wallet" when
+  the own credential issuer has a link for the offer. The links come from its
+  new public `GET /disclosure-offers`; the EU route works only with the GBO test
+  build of the EUDI reference wallet, which trusts the GBO development
+  certificates. Without the issuer the choice is hidden.
+- **Disclosure-based issuance in the own credential issuer** (#614): a wallet
+  discloses the BSN from its PID (OpenID4VP 1.0) and gets a pre-authorized offer
+  through `redirect_uri`, with a fixed link per offer and wallet. The issuer
+  verifies the PID itself (`oid4vc-kit/oid4vp`) and passes the BSN to the source
+  as a disclosure. `make provision-wallet-registration` also issues a WRPRC per
+  source for its verifier role (`Service_Provider`, the `bsn` of the PID); run
+  it again for sources provisioned before, and `make provision-test-pid` too.
+  The materializer writes a disclosure offer per source offer and the trusted
+  PID issuers: the NL pre-production CA and the test PID.
 - **The own issuer explains a source without data to EUDI wallets** (#614):
-  after a disclosure on the `eudi` profile for which the source has no data,
-  the issuer answers with a `redirect_uri` to its page
-  `…/vp/<offer>/no-data` ("Geen gegevens gevonden"), which names the
-  organization and the attestation. The EUDI reference wallets showed the
-  refusal as a generic error ("Houston we have a problem!" with "Try again"
-  on iOS). The NL Wallet keeps `no_issuable_attestations`.
-- **Test PID for the own credential issuer** (#614): `make
-  provision-test-pid` adds a test PID provider (`urn:eudi:pid:nl:1`) under a
-  development root of its own, registered with the `PID_Provider`
-  entitlement, and the new `test-pid-source` stub serves its data from the
-  BRP mock persons. Wallets without a real PID, such as the EUDI reference
-  wallet, get one through a pre-authorized offer. A test fixture, not a PID
-  Provider.
-- **Test PID block in the developer portal**: in the EUDI tab a tester picks
-  a BRP mock person and scans a QR code (or opens the same-device link) with
-  the EUDI reference wallet to get the test PID, without shell access to the
-  issuer's internal API. `dev-portal-backend` makes the offer on the
-  issuer's `eudi` profile and accepts only the mock persons. On by default in
-  the local Compose setup; an empty `TEST_PID_OFFERS_URL` removes the block
-  and its endpoints, since anyone who reaches the portal could otherwise get
-  a test PID. EU wallets only: the NL Wallet takes its PID from its own
-  pre-production issuer.
+  after a disclosure on the `eudi` profile for which the source has no data, the
+  issuer answers with a `redirect_uri` to its page `…/vp/<offer>/no-data` ("Geen
+  gegevens gevonden"), which names the organization and the attestation. The
+  EUDI reference wallets showed the refusal as a generic error ("Houston we have
+  a problem!" with "Try again" on iOS). The NL Wallet keeps
+  `no_issuable_attestations`.
+- **Test PID for the own credential issuer** (#614): `make provision-test-pid`
+  adds a test PID provider (`urn:eudi:pid:nl:1`) under a development root of its
+  own, registered with the `PID_Provider` entitlement, and the new
+  `test-pid-source` stub serves its data from the BRP mock persons. Wallets
+  without a real PID, such as the EUDI reference wallet, get one through a
+  pre-authorized offer. A test fixture, not a PID Provider.
+- **Test PID block in the developer portal**: in the EUDI tab a tester picks a
+  BRP mock person and scans a QR code (or opens the same-device link) with the
+  EUDI reference wallet to get the test PID, without shell access to the
+  issuer's internal API. `dev-portal-backend` makes the offer on the issuer's
+  `eudi` profile and accepts only the mock persons. On by default in the local
+  Compose setup; an empty `TEST_PID_OFFERS_URL` removes the block and its
+  endpoints, since anyone who reaches the portal could otherwise get a test PID.
+  EU wallets only: the NL Wallet takes its PID from its own pre-production
+  issuer.
 - **Revocation block in the developer portal** (#696): in the EUDI tab the
-  offers the portal makes carry a reference, the test PID's and a new offer
-  of a source attestation for a chosen BSN next to the fixed EU-wallet links.
-  The block lists these offers and revokes all credentials the issuer issued
-  for one, revokes a single status list entry, and shows the public status
-  lists of the offers, decoded but not verified. The offers are kept in
-  memory. Off by default: `CREDENTIAL_ISSUER_INTERNAL_URL` in `.env` turns
-  on the block and its endpoints, since anyone who reaches the portal
-  backend could otherwise revoke any credential of the issuer. An offer of
-  a source attestation is only made for a test person's BSN. The
-  test PID offer carries a reference even then, so the issuer keeps it valid
-  for its configured days.
-- **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's
-  PID disclosure it accepts `{"subject": {"bsn": ...}}` from a credential
-  issuer whose offer caller named the subject. It logs that as a separate
+  offers the portal makes carry a reference, the test PID's and a new offer of a
+  source attestation for a chosen BSN next to the fixed EU-wallet links. The
+  block lists these offers and revokes all credentials the issuer issued for
+  one, revokes a single status list entry, and shows the public status lists of
+  the offers, decoded but not verified. The offers are kept in memory. Off by
+  default: `CREDENTIAL_ISSUER_INTERNAL_URL` in `.env` turns on the block and its
+  endpoints, since anyone who reaches the portal backend could otherwise revoke
+  any credential of the issuer. An offer of a source attestation is only made
+  for a test person's BSN. The test PID offer carries a reference even then, so
+  the issuer keeps it valid for its configured days.
+- **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's PID
+  disclosure it accepts `{"subject": {"bsn": ...}}` from a credential issuer
+  whose offer caller named the subject. It logs that as a separate
   Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
   `logboek-eudi-adapter`, before it asks the source.
-- **Refresh tokens at the own credential issuer** (#614): on the `eudi`
-  profile each token response carries a refresh token, valid 30 days, not
-  rotated (FAPI 2.0), bound to the wallet and its DPoP key. A refresh re-issues the claims
-  of the first issuance; the source is not asked again and no BSN is kept,
-  but the claims are kept until the refresh token expires. A revoked offer
-  reference stops it.
-- **Consent that names the credential** (#614): the own credential issuer
-  names the credential configurations in `authorization_details` when it
-  sends the citizen to GBO's authorization server, and the server's request
-  page shows the credential and its claims, read from the issuer's
-  metadata (OpenID4VCI 1.0 sections 12.2.4 and 15.1).
-- **Deferred issuance at the own credential issuer** (#614): when the source
-  is unavailable just after a citizen logged in, the wallet gets its code
-  anyway, the credential request answers `202` with a `transaction_id`, and
+- **Refresh tokens at the own credential issuer** (#614): on the `eudi` profile
+  each token response carries a refresh token, valid 30 days, not rotated (FAPI
+  2.0), bound to the wallet and its DPoP key. A refresh re-issues the claims of
+  the first issuance; the source is not asked again and no BSN is kept, but the
+  claims are kept until the refresh token expires. A revoked offer reference
+  stops it.
+- **Consent that names the credential** (#614): the own credential issuer names
+  the credential configurations in `authorization_details` when it sends the
+  citizen to GBO's authorization server, and the server's request page shows the
+  credential and its claims, read from the issuer's metadata (OpenID4VCI 1.0
+  sections 12.2.4 and 15.1).
+- **Deferred issuance at the own credential issuer** (#614): when the source is
+  unavailable just after a citizen logged in, the wallet gets its code anyway,
+  the credential request answers `202` with a `transaction_id`, and
   `POST /{provider}/eudi/deferred_credential` asks the source again on every
   request (OpenID4VCI 1.0 section 9). The BSN from the login is kept sealed,
   apart from the session, for at most 24 hours. Replaces the "Bron niet
@@ -275,64 +265,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   profile a pre-authorized offer may ask for a six-digit transaction code
   (`tx_code: true` in `POST /offers`). The issuer returns the code apart
   (`tx_code_value`) for the caller to deliver through another channel, keeps
-  only a hash bound to the offer, and uses the offer up after three wrong
-  codes. The NL Wallet profiles still refuse it.
-- **Notifications at the own credential issuer** (#614): on the `eudi`
-  profile each credential response carries a `notification_id`, and
-  `POST /{provider}/eudi/notification` takes the wallet's
-  `credential_accepted`, `credential_failure` or `credential_deleted`
-  (OpenID4VCI 1.0 section 11). The issuer logs the event; it revokes nothing.
-- **One credential configuration per source offer** (#614): the own
-  credential issuer's configuration now has a credential configuration per
-  offer of an activated type, `<source>-<offer>` with that scope and the
-  offer's label as name ("Inkomensverklaring 2025"), instead of one per type.
-  A wallet that starts at the issuer can so ask for one year; before, a
-  type with two offers gave `invalid_scope`. The type's vct, claims and
-  status list are shared.
-- **The developer portal shows the login QR** (#614): on the EU-wallet tab
-  of an offer the own credential issuer serves, a second QR, "Met inloggen
-  in plaats van PID delen", starts the authorization code flow; the citizen
-  logs in at GBO's authorization server instead of sharing the PID.
-- **Authorization code flow at the own credential issuer** (#614): on the
-  `eudi` profile a citizen identifies by logging in at GBO's authorization
-  server instead of disclosing the PID. The wallet pushes its authorization
-  request (PAR, required), the issuer sends the browser to the login as the
-  source's client, redeems the code there with `private_key_jwt`, DPoP and
-  PKCE, checks the token itself and asks the source with
-  `"origin": "login"`. The wallet gets a code bound to its client,
-  redirect URI, PKCE challenge and, with a DPoP proof at PAR, its DPoP key.
-  When the source has no data or is unavailable, the citizen sees a page
-  with a button back to the wallet. Every source offer gets a login link
-  (`login_link` in `GET /disclosure-offers`). A wallet may also start at
-  the issuer itself, naming the credential type in `scope` or
-  `authorization_details`; that works for a configuration with one source
-  offer and is `invalid_scope` otherwise. Configured with
-  `ISSUER_LOGIN_SERVER`; without it nothing changes.
-- **The ASI authorization server serves credential issuers** (#614): a
-  client registered with the `PUB_EAA_Provider` entitlement and scope
-  `issuance` obtains tokens for the issuance resource of its own
-  organisation (`AZSP_ISSUANCE_RESOURCES`), so the citizen logs in at the
-  same service before a source's attestation is issued to a wallet. The
-  request page then asks consent for an attestation instead of a
-  verification. The ASI part is unchanged: a token for a data service of the
-  ASIP still goes only to a `QEAA_Provider`, and the two roles never share a
-  client. This use is outside ETSI TS 119 478.
-- **`eudi-adapter` knows a BSN from a login** (#614): a credential issuer
-  whose citizen logged in at GBO's authorization server sends
-  `{"subject": {"bsn": ...}, "origin": "login"}`. The adapter logs that as
-  the Dataverwerking `gbo-bsn-uit-inloggen`, added to the register of
+  only a hash bound to the offer, and uses the offer up after three wrong codes.
+  The NL Wallet profiles still refuse it.
+- **Notifications at the own credential issuer** (#614): on the `eudi` profile
+  each credential response carries a `notification_id`, and
+  `POST /{provider}/eudi/notification` takes the wallet's `credential_accepted`,
+  `credential_failure` or `credential_deleted` (OpenID4VCI 1.0 section 11). The
+  issuer logs the event; it revokes nothing.
+- **One credential configuration per source offer** (#614): the own credential
+  issuer's configuration now has a credential configuration per offer of an
+  activated type, `<source>-<offer>` with that scope and the offer's label as
+  name ("Inkomensverklaring 2025"), instead of one per type. A wallet that
+  starts at the issuer can so ask for one year; before, a type with two offers
+  gave `invalid_scope`. The type's vct, claims and status list are shared.
+- **The developer portal shows the login QR** (#614): on the EU-wallet tab of an
+  offer the own credential issuer serves, a second QR, "Met inloggen in plaats
+  van PID delen", starts the authorization code flow; the citizen logs in at
+  GBO's authorization server instead of sharing the PID.
+- **Authorization code flow at the own credential issuer** (#614): on the `eudi`
+  profile a citizen identifies by logging in at GBO's authorization server
+  instead of disclosing the PID. The wallet pushes its authorization request
+  (PAR, required), the issuer sends the browser to the login as the source's
+  client, redeems the code there with `private_key_jwt`, DPoP and PKCE, checks
+  the token itself and asks the source with `"origin": "login"`. The wallet gets
+  a code bound to its client, redirect URI, PKCE challenge and, with a DPoP
+  proof at PAR, its DPoP key. When the source has no data or is unavailable, the
+  citizen sees a page with a button back to the wallet. Every source offer gets
+  a login link (`login_link` in `GET /disclosure-offers`). A wallet may also
+  start at the issuer itself, naming the credential type in `scope` or
+  `authorization_details`; that works for a configuration with one source offer
+  and is `invalid_scope` otherwise. Configured with `ISSUER_LOGIN_SERVER`;
+  without it nothing changes.
+- **The ASI authorization server serves credential issuers** (#614): a client
+  registered with the `PUB_EAA_Provider` entitlement and scope `issuance`
+  obtains tokens for the issuance resource of its own organisation
+  (`AZSP_ISSUANCE_RESOURCES`), so the citizen logs in at the same service before
+  a source's attestation is issued to a wallet. The request page then asks
+  consent for an attestation instead of a verification. The ASI part is
+  unchanged: a token for a data service of the ASIP still goes only to a
+  `QEAA_Provider`, and the two roles never share a client. This use is outside
+  ETSI TS 119 478.
+- **`eudi-adapter` knows a BSN from a login** (#614): a credential issuer whose
+  citizen logged in at GBO's authorization server sends
+  `{"subject": {"bsn": ...}, "origin": "login"}`. The adapter logs that as the
+  Dataverwerking `gbo-bsn-uit-inloggen`, added to the register of
   `logboek-eudi-adapter`; without `origin` the request stays a pre-authorized
   offer, and an unknown origin is refused before anything is logged or the
   source is asked.
-- **The landing page offers the Installatie Register scenario**: the DvTP
-  card under "Zelf uitproberen" lets the visitor choose between HypotheekBV
-  and the Installatie Register, with its own steps, test BSNs and start
-  button. The start URL comes from `INSTALLATIE_REGISTER_URL` at runtime, or
-  from `KEYPER_PUBLIC_URL` in compose, and falls back to
-  `http://localhost:9004`.
+- **The landing page offers the Installatie Register scenario**: the DvTP card
+  under "Zelf uitproberen" lets the visitor choose between HypotheekBV and the
+  Installatie Register, with its own steps, test BSNs and start button. The
+  start URL comes from `INSTALLATIE_REGISTER_URL` at runtime, or from
+  `KEYPER_PUBLIC_URL` in compose, and falls back to `http://localhost:9004`.
 - **`asi-mapping` builds attributes from a source's answer** (#592, step 4a):
-  from the requested attributes and fragments it derives one query with only
-  the fields they need, builds each value with `pointer`, `join`, `const` and
+  from the requested attributes and fragments it derives one query with only the
+  fields they need, builds each value with `pointer`, `join`, `const` and
   `each`, and checks it against the attribute's `value_schema`, `format: date`
   included. A missing required member, an empty list, an unknown person or an
   answer of another type than `on` is no value; a fragment needs only its own
@@ -343,218 +330,215 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   metadata, now version 2.6.0 at schema 1.1, maps its own fields onto the five
   demo attributes the ASIP verifies. Its API, its policy rule and its EUDI
   products do not change. Tests hold the mapping against the mock's GraphQL
-  schema and against the fields policy rule ASI0001 grants the ASIP. The
-  ASIP still uses its BRP adapter until step 4.
+  schema and against the fields policy rule ASI0001 grants the ASIP. The ASIP
+  still uses its BRP adapter until step 4.
 - **Onboarding accepts source metadata 1.1 with `asi`** (#592, step 3a): the
   reconciler validates the `asi` capability against GBO's attribute catalogue
-  and stores it in the source's release snapshot, at snapshot version 4.0 so
-  an adapter without asi does not rewrite it; snapshots without asi stay 3.0.
-  The ASIP does not read it yet. An invalid `asi` rejects the whole source, a document with only
-  `asi` is still rejected, and a catalogue the reconciler cannot read blocks
-  only the sources that offer `asi`. The `asi` query follows the transport
-  rules of the attestations and uses the same FSC data service. The EUDI
-  products of a source are the same at 1.0 and 1.1.
+  and stores it in the source's release snapshot, at snapshot version 4.0 so an
+  adapter without asi does not rewrite it; snapshots without asi stay 3.0. The
+  ASIP does not read it yet. An invalid `asi` rejects the whole source, a
+  document with only `asi` is still rejected, and a catalogue the reconciler
+  cannot read blocks only the sources that offer `asi`. The `asi` query follows
+  the transport rules of the attestations and uses the same FSC data service.
+  The EUDI products of a source are the same at 1.0 and 1.1.
 - **Source metadata 1.1: the `asi` capability** (#592, step 1): a source can
-  describe the attributes it offers for verification and map its own fields
-  onto each attribute's value with `pointer`, `join`, `const` and `each`.
-  GBO keeps the shape of each value per attribute identifier in
+  describe the attributes it offers for verification and map its own fields onto
+  each attribute's value with `pointer`, `join`, `const` and `each`. GBO keeps
+  the shape of each value per attribute identifier in
   `schemas/asi-attributes.json` until the EU catalogue of attributes provides
-  it. The new module `services/asi-mapping` checks the GraphQL document and
-  the mapping against that catalogue. The reconciler does not activate `asi`
-  yet and still rejects 1.1 documents; 1.0 documents are unchanged.
-- **Complete OpenFTV PDP Helm example** (#492): mount a ConfigMap for the
-  DvTP admission-register pull and a TLS Secret for the Inway connection, set
-  the consent-register addresses and token identifiers, and document which
-  values must be supplied by each deployment. The PDP source-build comment
-  now names the remaining GraphQL mapper patch instead of the completed #331.
-- **Documentation of the ASI route** (#336, slice 8): `docs/asi-route.md`
-  states for each part of the route whether it is real, stubbed, a GBO
-  interpretation or a demo shortcut. `conformance/security-considerations.md`
-  weighs the security considerations of ETSI TS 119 478 clause 6.1.3.4 item by
-  item against RFC 9700 and the FAPI 2.0 Security Profile; REQ-AZSP-6.1.3.4-01
-  is now passed. Outdated statements in the ASI service READMEs are corrected.
-- **Same-device NL Wallet login at the ASI authorization server** (#548):
-  the wallet page always shows an “Open NL Wallet” universal link and the
-  cross-device QR code, with CSS putting the button first on a narrow screen
-  and no JavaScript or CSP relaxation. After a same-device disclosure the
-  wallet returns with a verifier nonce; the authorization core first binds
-  its session token to the transaction and browser before the verifier may
-  release the PID. A local HTTP issuer keeps the button visible but disabled
-  and the QR flow working. The real-phone run follows when the ASI route is
-  available over HTTPS in the simulation environment.
+  it. The new module `services/asi-mapping` checks the GraphQL document and the
+  mapping against that catalogue. The reconciler does not activate `asi` yet and
+  still rejects 1.1 documents; 1.0 documents are unchanged.
+- **Complete OpenFTV PDP Helm example** (#492): mount a ConfigMap for the DvTP
+  admission-register pull and a TLS Secret for the Inway connection, set the
+  consent-register addresses and token identifiers, and document which values
+  must be supplied by each deployment. The PDP source-build comment now names
+  the remaining GraphQL mapper patch instead of the completed #331.
+- **Documentation of the ASI route** (#336, slice 8): `docs/asi-route.md` states
+  for each part of the route whether it is real, stubbed, a GBO interpretation
+  or a demo shortcut. `conformance/security-considerations.md` weighs the
+  security considerations of ETSI TS 119 478 clause 6.1.3.4 item by item against
+  RFC 9700 and the FAPI 2.0 Security Profile; REQ-AZSP-6.1.3.4-01 is now passed.
+  Outdated statements in the ASI service READMEs are corrected.
+- **Same-device NL Wallet login at the ASI authorization server** (#548): the
+  wallet page always shows an “Open NL Wallet” universal link and the
+  cross-device QR code, with CSS putting the button first on a narrow screen and
+  no JavaScript or CSP relaxation. After a same-device disclosure the wallet
+  returns with a verifier nonce; the authorization core first binds its session
+  token to the transaction and browser before the verifier may release the PID.
+  A local HTTP issuer keeps the button visible but disabled and the QR flow
+  working. The real-phone run follows when the ASI route is available over HTTPS
+  in the simulation environment.
 - **Per-attribute binding is optional on the ASI route** (#571): an
-  authorization request without RFC 9396 `authorization_details` is accepted
-  and produces a token bound to the data service and ETSI operation scope
-  only; the ASIP then allows every attribute in that data service's catalogue.
-  When a valid detail is supplied, the selected attributes remain bound to
-  the code and token and the ASIP still refuses attributes outside that set.
-  Set `AZSP_REQUIRE_AUTHORIZATION_DETAILS=true` on the authorization server
+  authorization request without RFC 9396 `authorization_details` is accepted and
+  produces a token bound to the data service and ETSI operation scope only; the
+  ASIP then allows every attribute in that data service's catalogue. When a
+  valid detail is supplied, the selected attributes remain bound to the code and
+  token and the ASIP still refuses attributes outside that set. Set
+  `AZSP_REQUIRE_AUTHORIZATION_DETAILS=true` on the authorization server
   (`ASI_REQUIRE_AUTHORIZATION_DETAILS=true` in Compose) to require the
   per-attribute detail.
-- **The reference QTSP issues a test statement to the NL Wallet** (#549):
-  after an accepted ASI verification or retrieval, the result page offers a
-  QR code for the central issuance server. The QTSP keeps the result for ten
-  minutes and releases it once only when the wallet discloses the same name,
-  date of birth and nationalities as the QTSP login. The central server uses
-  separate QTSP reader, issuer and status-list certificates and calls the
-  QTSP over CA-pinned internal HTTPS. The 30-day SD-JWT VC is visibly marked
-  as a non-qualified test statement; `NoMatch`, `Unknown`, mismatched and
-  expired identities receive nothing, while a newer request for the same
-  citizen replaces the previous pending request. Missing optional QTSP
-  material no longer blocks the ASI or ordinary source-issuance routes.
-- **The citizen logs in at the reference QTSP** (#560): before a request
-  starts, with the NL Wallet (the PID's name, date of birth and
-  nationalities, not the BSN, through usecase `qtsp-login` of the wallet
-  verifier, which the QTSP shares with the authorization server as a demo
-  shortcut) or with test data (a mock that checks nothing). A login lasts 30
-  minutes; the pages name the citizen. The request API accepts `login_hint`
-  test data, which the developer portal sends from the scenario, so a demo
-  runs without a phone. The CLI does not log in.
-- **The ASI authorization server's pages in NL Design System's Voorbeeld
-  theme** (#547): the request, wallet and error pages use the neutral theme
-  and Utrecht components, served from the server itself without script or
-  inline style. The request page says in plain language who asks what at
-  which source, and that logging in at the source approves the QTSP's
-  request; the wallet's reader certificate says the citizen logs in at the
-  source to approve a request of a trust service provider (run make
-  provision-asi-wallet-verifier again to get it). The pages and the reference
-  QTSP work on a phone. The page also lists the selected attributes; RFC 9396
-  `authorization_details` binds them to the authorization code and access
-  token, and the ASIP refuses attributes outside that approved set.
+- **The reference QTSP issues a test statement to the NL Wallet** (#549): after
+  an accepted ASI verification or retrieval, the result page offers a QR code
+  for the central issuance server. The QTSP keeps the result for ten minutes and
+  releases it once only when the wallet discloses the same name, date of birth
+  and nationalities as the QTSP login. The central server uses separate QTSP
+  reader, issuer and status-list certificates and calls the QTSP over CA-pinned
+  internal HTTPS. The 30-day SD-JWT VC is visibly marked as a non-qualified test
+  statement; `NoMatch`, `Unknown`, mismatched and expired identities receive
+  nothing, while a newer request for the same citizen replaces the previous
+  pending request. Missing optional QTSP material no longer blocks the ASI or
+  ordinary source-issuance routes.
+- **The citizen logs in at the reference QTSP** (#560): before a request starts,
+  with the NL Wallet (the PID's name, date of birth and nationalities, not the
+  BSN, through usecase `qtsp-login` of the wallet verifier, which the QTSP
+  shares with the authorization server as a demo shortcut) or with test data (a
+  mock that checks nothing). A login lasts 30 minutes; the pages name the
+  citizen. The request API accepts `login_hint` test data, which the developer
+  portal sends from the scenario, so a demo runs without a phone. The CLI does
+  not log in.
+- **The ASI authorization server's pages in NL Design System's Voorbeeld theme**
+  (#547): the request, wallet and error pages use the neutral theme and Utrecht
+  components, served from the server itself without script or inline style. The
+  request page says in plain language who asks what at which source, and that
+  logging in at the source approves the QTSP's request; the wallet's reader
+  certificate says the citizen logs in at the source to approve a request of a
+  trust service provider (run make provision-asi-wallet-verifier again to get
+  it). The pages and the reference QTSP work on a phone. The page also lists the
+  selected attributes; RFC 9396 `authorization_details` binds them to the
+  authorization code and access token, and the ASIP refuses attributes outside
+  that approved set.
 - **ASI wallet verifier** (`asi-wallet-verifier`, port 9428, compose profile
-  `asi`): nl-wallet's `verification_server`, built from the vendor checkout
-  like the issuance server (`make asi-wallet-verifier-image`). `make
-  provision-asi-wallet-verifier` issues the reader certificate of usecase
+  `asi`): nl-wallet's `verification_server`, built from the vendor checkout like
+  the issuance server (`make asi-wallet-verifier-image`).
+  `make provision-asi-wallet-verifier` issues the reader certificate of usecase
   `asi-login` from the development reader CA and writes its configuration;
   `make demo-asi` starts it when the nl-wallet sources are present (#546).
 - **Logging in with the NL Wallet at the ASI authorization server.** "Inloggen
-  met NL Wallet" opens an OpenID4VP disclosure session at the wallet
-  verifier and shows its QR code; once the wallet disclosed the PID the
-  token carries the BSN, `family_name`, `given_name`, `birthdate`,
-  `nationalities` and `acr`/`amr` `nl-wallet`. The session is kept with the
-  transaction; declined, expired or unusable brings the user back to the
-  request page; an unreachable verifier gives a 503 page (#546).
+  met NL Wallet" opens an OpenID4VP disclosure session at the wallet verifier
+  and shows its QR code; once the wallet disclosed the PID the token carries the
+  BSN, `family_name`, `given_name`, `birthdate`, `nationalities` and `acr`/`amr`
+  `nl-wallet`. The session is kept with the transaction; declined, expired or
+  unusable brings the user back to the request page; an unreachable verifier
+  gives a 503 page (#546).
 - **Conformance matrix for ETSI TS 119 478** (`conformance/`): a status per
-  requirement ID of the specification (passed, stub, not-applicable or
-  failing), with the tests that prove it or the reason, read as Implementing
-  Regulation (EU) 2026/1735 Annex IV adapts it. A CI job checks that every ID
-  is covered, that every named test exists, and prints the count per role
-  (#533).
-- **ASIP mock (ETSI TS 119 478).** A mock Authentic Source Interface
-  Provider for qualified trust service providers (epic #336).
-  - `asi-provider` (port 4020): `POST /<data service>/authsrc-api/verify` and `/retrieve`
-    (clause 6.1.1 and 6.1.2) against the BRP, with the results
+  requirement ID of the specification (passed, stub, not-applicable or failing),
+  with the tests that prove it or the reason, read as Implementing Regulation
+  (EU) 2026/1735 Annex IV adapts it. A CI job checks that every ID is covered,
+  that every named test exists, and prints the count per role (#533).
+- **ASIP mock (ETSI TS 119 478).** A mock Authentic Source Interface Provider
+  for qualified trust service providers (epic #336).
+  - `asi-provider` (port 4020): `POST /<data service>/authsrc-api/verify` and
+    `/retrieve` (clause 6.1.1 and 6.1.2) against the BRP, with the results
     `Match`, `NoMatch`, `MatchWithVariation` and `Unknown`. Every result is
-    sealed with a detached JWS in `X-JWS-Signature`; the seal certificate
-    comes from the development CA (`make provision-asip-seal-certificate`).
-    `/openapi.json` publishes the contract: Annex B unchanged, plus
-    completions as a JSON Merge Patch (#498).
-  - `asi-authorization-server` (port 4021): the authorization server of
-    clause 6.1.3, with the authorization code flow, PKCE, `private_key_jwt`
-    and DPoP-bound JWT access tokens per RFC 9068. Clients are registered in
+    sealed with a detached JWS in `X-JWS-Signature`; the seal certificate comes
+    from the development CA (`make provision-asip-seal-certificate`).
+    `/openapi.json` publishes the contract: Annex B unchanged, plus completions
+    as a JSON Merge Patch (#498).
+  - `asi-authorization-server` (port 4021): the authorization server of clause
+    6.1.3, with the authorization code flow, PKCE, `private_key_jwt` and
+    DPoP-bound JWT access tokens per RFC 9068. Clients are registered in
     configuration or through dynamic client registration with a software
     statement sealed with the QTSP's certificate, checked against a stub
-    register for the `QEAA_Provider` entitlement and re-verified
-    periodically (`make provision-asip-qtsp-certificate` issues a test
-    certificate) (#503). One page shows the request, naming the QTSP by its
-    legal name, and the user logs in with a DigiD mock, which approves the
-    request, or denies it; the NL Wallet is shown but follows in slice 7. It
-    is not conformant. With DigiD the token carries the BSN only, with
-    `acr`/`amr` `digid-mock`; the test-person chooser and its PID claims are
-    gone (#523, #544).
-  - The ASIP validates every access token and DPoP proof, and takes the BSN
-    of the user from the token, in plain text until slice 9 of #336.
-  - `make demo-asi` adds both services to a running `demo-eudi` or
-    `demo-full`: the ASIP as an FSC consumer peer of its own (...1200,
-    compose profile `asi`), listed in the onboarding register, with a
-    connection contract for the BRP source (`brp`). The ASIP asks the BRP
-    through its Outway with a query of its own per attribute (name, date of
-    birth, nationality, a resident's address); rule `ASI0001` grants the
-    ASIP those fields, on `brp` only. A source that cannot be reached is 503,
-    a refusal in the chain 500 (#525).
+    register for the `QEAA_Provider` entitlement and re-verified periodically
+    (`make provision-asip-qtsp-certificate` issues a test certificate) (#503).
+    One page shows the request, naming the QTSP by its legal name, and the user
+    logs in with a DigiD mock, which approves the request, or denies it; the NL
+    Wallet is shown but follows in slice 7. It is not conformant. With DigiD the
+    token carries the BSN only, with `acr`/`amr` `digid-mock`; the test-person
+    chooser and its PID claims are gone (#523, #544).
+  - The ASIP validates every access token and DPoP proof, and takes the BSN of
+    the user from the token, in plain text until slice 9 of #336.
+  - `make demo-asi` adds both services to a running `demo-eudi` or `demo-full`:
+    the ASIP as an FSC consumer peer of its own (...1200, compose profile
+    `asi`), listed in the onboarding register, with a connection contract for
+    the BRP source (`brp`). The ASIP asks the BRP through its Outway with a
+    query of its own per attribute (name, date of birth, nationality, a
+    resident's address); rule `ASI0001` grants the ASIP those fields, on `brp`
+    only. A source that cannot be reached is 503, a refusal in the chain 500
+    (#525).
   - One ASIP for several authentic sources: a data service per source under
     `/<data service>/authsrc-api` (`config/dataservices.json`), each with its
     own contract, catalogue, `authenticSource` and token audience. The
-    authorization server accepts one data service per authorization
-    (`resource` is required, `AZSP_RESOURCES`). An attribute of another data
-    service is 404 (#525).
-  - The ASIP asks a source once per request, with the fields of all
-    requested attributes: one FSC transaction and one PDP decision per
-    request. It exports OTel spans with `gbo.fsc.transaction_id`, and the
-    developer portal backend watches its requests and reads its peer's
-    transaction log (`asip`) (#525).
-  - Discovery: each data service of the ASIP publishes a `dataService`
-    record per attribute (`/<data service>/dataservices`), and
-    `asi-discovery-stub` (port 9426, compose profile `asi`) answers the
-    Discover Interface's `retrieve` query from them; its contract is the
-    Annex A OpenAPI. The ASIP's contract names the authorization server's
-    metadata in `x-oauth-authorization-server` (#533).
-  - A reference QTSP (`qtsp-reference`, port 9427, compose profile `asi`):
-    it discovers an attribute's data service, registers with its
-    authorization server, lets the user authorize, takes a DPoP-bound token,
-    verifies or retrieves, and accepts a result only with a valid seal. A web
-    side where the user starts, and a CLI with test-harness options for the
-    error answers. The authorization server now allows an http redirect URI
-    on a loopback address (#533).
-  - The reference QTSP has a request API for the developer portal: it lays
-    a request down and gets a one-time start URL that carries only an id,
-    and fetches the outcome (pending, done with the result per attribute
-    and the seal check, denied, or failed) for 10 minutes (#533).
-  - The developer portal has an ASI tab: it watches a QTSP's verify or
-    retrieve at the ASIP and shows the chain (QTSP, ASIP, its Outway,
-    bd-inway, PDP, BRP), the transaction log of `asip` and BD, and the PDP
-    decision; the rule panel shows the services a rule binds on (#525).
-    On the ASI tab you choose verify or retrieve and the attributes with
-    their values; "Aanvragen" lays the request down at the reference QTSP
-    (through the dev-portal backend, `QTSP_URL`), opens its one-time start
-    URL in a new tab where the citizen picks a test person and approves or
-    denies, and shows the outcome next to the chain: the result per
-    attribute and the seal check, or the denial. Five scenarios cover Match,
-    MatchWithVariation, NoMatch, Unknown and a retrieve; their chip is the
-    ETSI outcome they expect (#533).
-  - Rules name the FSC services they bind on (`services`): a field key such
-    as `Query.ingeschrevenPersoon` is shared by `bri` and `brp`. EUD0001 and
+    authorization server accepts one data service per authorization (`resource`
+    is required, `AZSP_RESOURCES`). An attribute of another data service is 404
+    (#525).
+  - The ASIP asks a source once per request, with the fields of all requested
+    attributes: one FSC transaction and one PDP decision per request. It exports
+    OTel spans with `gbo.fsc.transaction_id`, and the developer portal backend
+    watches its requests and reads its peer's transaction log (`asip`) (#525).
+  - Discovery: each data service of the ASIP publishes a `dataService` record
+    per attribute (`/<data service>/dataservices`), and `asi-discovery-stub`
+    (port 9426, compose profile `asi`) answers the Discover Interface's
+    `retrieve` query from them; its contract is the Annex A OpenAPI. The ASIP's
+    contract names the authorization server's metadata in
+    `x-oauth-authorization-server` (#533).
+  - A reference QTSP (`qtsp-reference`, port 9427, compose profile `asi`): it
+    discovers an attribute's data service, registers with its authorization
+    server, lets the user authorize, takes a DPoP-bound token, verifies or
+    retrieves, and accepts a result only with a valid seal. A web side where the
+    user starts, and a CLI with test-harness options for the error answers. The
+    authorization server now allows an http redirect URI on a loopback address
+    (#533).
+  - The reference QTSP has a request API for the developer portal: it lays a
+    request down and gets a one-time start URL that carries only an id, and
+    fetches the outcome (pending, done with the result per attribute and the
+    seal check, denied, or failed) for 10 minutes (#533).
+  - The developer portal has an ASI tab: it watches a QTSP's verify or retrieve
+    at the ASIP and shows the chain (QTSP, ASIP, its Outway, bd-inway, PDP,
+    BRP), the transaction log of `asip` and BD, and the PDP decision; the rule
+    panel shows the services a rule binds on (#525). On the ASI tab you choose
+    verify or retrieve and the attributes with their values; "Aanvragen" lays
+    the request down at the reference QTSP (through the dev-portal backend,
+    `QTSP_URL`), opens its one-time start URL in a new tab where the citizen
+    picks a test person and approves or denies, and shows the outcome next to
+    the chain: the result per attribute and the seal check, or the denial. Five
+    scenarios cover Match, MatchWithVariation, NoMatch, Unknown and a retrieve;
+    their chip is the ETSI outcome they expect (#533).
+  - Rules name the FSC services they bind on (`services`): a field key such as
+    `Query.ingeschrevenPersoon` is shared by `bri` and `brp`. EUD0001 and
     DVT0001 bind on `bri`, EUD0002 on `brp`, LVG0001 on `lvg`; a policy test
-    requires every rule to name its services, so a root field alone on
-    another service is no longer granted (#525).
-  - Both services are laid out as ports and adapters: a core under
-    `internal/`, an HTTP adapter, and `main.go` as the composition root.
+    requires every rule to name its services, so a root field alone on another
+    service is no longer granted (#525).
+  - Both services are laid out as ports and adapters: a core under `internal/`,
+    an HTTP adapter, and `main.go` as the composition root.
 
   See [services/asi-provider/README.md](services/asi-provider/README.md) and
   [services/asi-authorization-server/README.md](services/asi-authorization-server/README.md).
-- **Integrator acting for a service provider.** An integrator peer
-  (`…1100`, `int-*`) queries BD on behalf of Hypotheek-BV over an FSC
+
+- **Integrator acting for a service provider.** An integrator peer (`…1100`,
+  `int-*`) queries BD on behalf of Hypotheek-BV over an FSC
   DelegatedServiceConnection grant, and `integrator-backend` (port 9423) asks
   the income question through it. See [docs/integrator.md](docs/integrator.md),
   which also records the answers to the five questions in the issue.
-  - The policy separates the two roles. The consent binds the represented
-    party (the FSC delegator, else `subject.id`). The connecting peer needs a
-    mandate for that party and rule, or the call is denied with
+  - The policy separates the two roles. The consent binds the represented party
+    (the FSC delegator, else `subject.id`). The connecting peer needs a mandate
+    for that party and rule, or the call is denied with
     `INTEGRATOR_NOT_REGISTERED`.
   - The DvTP onboarding register takes `integrations` (integrator, service
     provider, rules) and feeds them to OpenFTV as `acts_for`.
   - Contract autosign admits a `delegatedServiceConnection` when one
-    counterparty is registered as acting for the other. Otherwise the
-    contract is refused with `DELEGATION_NOT_REGISTERED`.
+    counterparty is registered as acting for the other. Otherwise the contract
+    is refused with `DELEGATION_NOT_REGISTERED`.
   - Opt-in: the demo keeps the direct path by default. `make demo-integrator`,
     run after `demo-dvtp` or `demo-full`, adds the integrator's peer (compose
-    profile `integrator`), seeds the three-party contract (`make
-    fsc-seed-int`) and starts `integrator-backend`.
+    profile `integrator`), seeds the three-party contract (`make fsc-seed-int`)
+    and starts `integrator-backend`.
 - **LVG / Installatie Register.** The pilot's DvTP flow in the demo: the
-  Installatie Register asks the citizen in MijnOverheid for consent to check
-  at LVG whether a building is theirs, and asks LVG over FSC with the consent
+  Installatie Register asks the citizen in MijnOverheid for consent to check at
+  LVG whether a building is theirs, and asks LVG over FSC with the consent
   token. See [docs/lvg-ir.md](docs/lvg-ir.md).
   - `keyper-mock` (port 9004) plays IR/Keyper: the installer's request, the
     owner's approval and the installer's data behind a recurring check.
-  - IR is an FSC consumer peer of its own (`…1000`, `ir-*`), so the PDP's
-    actor binding tells it apart from Hypotheek-BV.
+  - IR is an FSC consumer peer of its own (`…1000`, `ir-*`), so the PDP's actor
+    binding tells it apart from Hypotheek-BV.
   - LVG is a third logical source on the shared provider peer, like RvIG:
     service `lvg`, `lvg-sidecar` and `lvg-graphql-server`. `make fsc-seed-lvg`
     publishes it and connects IR.
-  - Policy rule `LVG0001`: the DVT0001 consent checks, with the scope pinned
-    to `lvg:vbo:eigendom`.
-  - `dienstverlener-backend` takes `QUERY_KIND` (`bd` or `lvg`); `ir-backend`
-    is the same image with `lvg`.
+  - Policy rule `LVG0001`: the DVT0001 consent checks, with the scope pinned to
+    `lvg:vbo:eigendom`.
+  - `dienstverlener-backend` takes `QUERY_KIND` (`bd` or `lvg`); `ir-backend` is
+    the same image with `lvg`.
   - Two Logboeken Dataverwerkingen: `logboek-lvg` for the source and its
     sidecar, and `logboek-ir` for the consumer, whose record points at LVG's
     logbook.
@@ -562,389 +546,373 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     `ir-backend` and predefined issuance grants it to IR's Peer ID. Three
     scenarios cover issuance, an owner and a non-owner; the FSC txlog panel
     includes IR's peer.
-- **`bsnk-mock` follows BSNk's own interface.** Under `/v2` it activates a
-  BSN into a polymorphic identity and pseudonym for the requester, transforms
-  those into an encrypted identity or pseudonym per party, and issues the
-  keys with which a party reads its values. The requests and answers are
-  BSNk's, as JSON instead of SOAP and with the same field names and fault
-  reasons. `/signed-encrypted-identity` and `/signed-encrypted-pseudonym`
-  stand in for the decryption component a party runs itself, with that
-  component's requests and answers.
-  - A value has the fields of the real structure and is the base64 of JSON
-    that anyone can decode, so a test can assert on the recipient, the key
-    set version or the BSN without a key. Nothing is encrypted.
+- **`bsnk-mock` follows BSNk's own interface.** Under `/v2` it activates a BSN
+  into a polymorphic identity and pseudonym for the requester, transforms those
+  into an encrypted identity or pseudonym per party, and issues the keys with
+  which a party reads its values. The requests and answers are BSNk's, as JSON
+  instead of SOAP and with the same field names and fault reasons.
+  `/signed-encrypted-identity` and `/signed-encrypted-pseudonym` stand in for
+  the decryption component a party runs itself, with that component's requests
+  and answers.
+  - A value has the fields of the real structure and is the base64 of JSON that
+    anyone can decode, so a test can assert on the recipient, the key set
+    version or the BSN without a key. Nothing is encrypted.
   - The mock enforces BSNk's rules: a polymorphic value is for its requester
-    only, an identity and the key to read it go only to a party that may
-    have the BSN (`BSN_AUTHORISED_OINS`), a transformation serves at most
-    four parties, and a value is read only with a key for its party and key
-    set version.
+    only, an identity and the key to read it go only to a party that may have
+    the BSN (`BSN_AUTHORISED_OINS`), a transformation serves at most four
+    parties, and a value is read only with a key for its party and key set
+    version.
   - Values are stable by default and differ on every request with
     `RANDOMIZE_VALUES=true`.
   - `/pseudonymize` and `/transform` are unchanged; no caller uses the new
     endpoints yet.
-  - The service is laid out as ports and adapters: a core per interface
-    under `internal/`, one HTTP adapter, and `main.go` as the composition
-    root.
+  - The service is laid out as ports and adapters: a core per interface under
+    `internal/`, one HTTP adapter, and `main.go` as the composition root.
 
   See [services/bsnk-mock/README.md](services/bsnk-mock/README.md).
+
 - **`make policy-check` reports a broken policy before the PDP swallows it
   (#335).** The PDP hot-reloads `policies/`, but OpenFTV logs
   `policy added/replaced` for a module that failed to compile as well, stays
   healthy and keeps answering with the previous rules (#151). The target runs
-  the only-Rego guard and `opa check` with the image CI pins, and names the
-  file and line of the error in a second or two without the stack running.
-  Every target that starts the PDP runs it first; `make policy-test` adds the
-  format diff and unit tests. The engine still swallows a broken module at
-  runtime — #151 stays open for that.
-- **The `gbo-app` chart can express a one-shot workload.** `job.enabled`
-  renders a Job instead of a Deployment, Service and HTTPRoute — mutually
-  exclusive, because a release either serves traffic or runs to completion.
-  Combining it with `route.enabled` is a template error rather than a silently
-  ignored value.
+  the only-Rego guard and `opa check` with the image CI pins, and names the file
+  and line of the error in a second or two without the stack running. Every
+  target that starts the PDP runs it first; `make policy-test` adds the format
+  diff and unit tests. The engine still swallows a broken module at runtime —
+  #151 stays open for that.
+- **The `gbo-app` chart can express a one-shot workload.** `job.enabled` renders
+  a Job instead of a Deployment, Service and HTTPRoute — mutually exclusive,
+  because a release either serves traffic or runs to completion. Combining it
+  with `route.enabled` is a template error rather than a silently ignored value.
   - The Job is named `<fullname>-<release revision>`. A Job spec is immutable,
-    so a release that reruns a task creates a new object instead of patching
-    the old one; `kubectl get jobs` then reads as a history of attempts, and
-    Helm removes the previous revision's Job on upgrade.
+    so a release that reruns a task creates a new object instead of patching the
+    old one; `kubectl get jobs` then reads as a history of attempts, and Helm
+    removes the previous revision's Job on upgrade.
   - `parallelism` and `completions` are pinned to 1 and `replicaCount` is
     ignored, so one release never runs a migration in two pods at once.
     `restartPolicy: Never` keeps a failed pod for `kubectl logs`, and
     `activeDeadlineSeconds` (default 600) fails a wedged migration instead of
-    hanging. Deploy Job releases with `--wait --wait-for-jobs` — plain
-    `--wait` does not wait for Jobs; Flux does by default.
+    hanging. Deploy Job releases with `--wait --wait-for-jobs` — plain `--wait`
+    does not wait for Jobs; Flux does by default.
   - Helm creates a new revision's Job before deleting the previous one, in the
-    background, so attempts can overlap across revisions. Exclusion lives in
-    the database: `scripts/bootstrap-source-registry.sh` now holds an advisory
-    lock in each psql session, `migrate-source-registry` already held one, and
+    background, so attempts can overlap across revisions. Exclusion lives in the
+    database: `scripts/bootstrap-source-registry.sh` now holds an advisory lock
+    in each psql session, `migrate-source-registry` already held one, and
     nl-wallet's migrator applies each run in a single transaction against a
     primary-keyed history table, so two attempts cannot both commit.
-  - The three EUDI database tasks that had no home in the chart now have
-    example values files: `source-registry-bootstrap`,
-    `source-registry-migrations` and `eudi-migrations`.
-    `eudi-issuance-materialize` stays an init container — it writes
-    `issuance_server.toml` into the pod's own `emptyDir`, so it has to run in
-    that pod, before that container, every time.
-  - `postgres-eudi` gains an example too, and stays a Deployment with
-    `Recreate` and a ReadWriteOnce PVC rather than becoming a StatefulSet.
-    `Recreate` already guarantees that two postgres processes never open one
-    data directory; per-replica identity buys nothing for a single replica
-    reached through its Service. The reasoning is recorded in the values file
-    and in the new `deploy/helm/gbo-app/README.md`, which documents both
-    release shapes and where each one-shot workload belongs.
+  - The three EUDI database tasks that had no home in the chart now have example
+    values files: `source-registry-bootstrap`, `source-registry-migrations` and
+    `eudi-migrations`. `eudi-issuance-materialize` stays an init container — it
+    writes `issuance_server.toml` into the pod's own `emptyDir`, so it has to
+    run in that pod, before that container, every time.
+  - `postgres-eudi` gains an example too, and stays a Deployment with `Recreate`
+    and a ReadWriteOnce PVC rather than becoming a StatefulSet. `Recreate`
+    already guarantees that two postgres processes never open one data
+    directory; per-replica identity buys nothing for a single replica reached
+    through its Service. The reasoning is recorded in the values file and in the
+    new `deploy/helm/gbo-app/README.md`, which documents both release shapes and
+    where each one-shot workload belongs.
   - The Deployment and the Job render from one shared pod spec helper, so the
     two shapes cannot drift. Rendering is byte-identical for every existing
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
-- **The safety audit runs in CI** (`safety` job, `make check-safety`) and
-  scans every tracked file. It now flags OINs with a real register prefix;
-  test data uses demo OINs (`99999999…`) instead.
-- **The demo starts in order through compose instead of retries and
-  waiting scripts**: each FSC migration runs once and its peer services
-  wait for it to complete, instead of restarting on failure while the
-  services start anyway. The migrations allow 10 s to connect, name lookup
-  included, because Docker's DNS can be that slow while the whole stack
-  starts at once. A `postgres-init` one-shot in `fsc-infra` creates
-  the FSC databases on every `up` and holds their only list, which replaces
-  the initdb script and `make fsc-databases`. `make demo-manager` now seeds
-  the OpenFTV Manager before the rest of the stack starts, so the PDP pulls
-  the policy bundle at boot without a restart.
-- **The PDP reads the DvTP onboarding register live**: contract auto-signing
-  and the integrator mandate check ask the register with `http.send` on
-  every decision that needs it (`policies/gbo/register.rego`), as the
-  consent status already was, instead of OpenFTV pulling it every five
-  seconds. A freshly started PDP therefore decides on the register from its
-  first request, so its healthcheck is the plain `/healthz` and
-  `scripts/wait-openftv-admission.sh`, which waited for the first pull, is
-  gone; so is the pull configuration (`services/openftv-pdp/pip-pull/` and
-  its Helm ConfigMap example; the Helm values now set `GBO_REGISTER_URL`).
-  A change in the register counts from the next decision. When the register
-  does not answer, auto-signing refuses with `ADMISSION_REGISTER_UNAVAILABLE`
-  and a delegated call with `INTEGRATOR_REGISTER_UNAVAILABLE`, where before
-  the PDP went on deciding on the last copy it had pulled. The OpenFSC
-  Manager does not ask again after a refusal, so a contract submitted while
-  the register is down stays pending until it is submitted again.
+
+- **The safety audit runs in CI** (`safety` job, `make check-safety`) and scans
+  every tracked file. It now flags OINs with a real register prefix; test data
+  uses demo OINs (`99999999…`) instead.
+- **The demo starts in order through compose instead of retries and waiting
+  scripts**: each FSC migration runs once and its peer services wait for it to
+  complete, instead of restarting on failure while the services start anyway.
+  The migrations allow 10 s to connect, name lookup included, because Docker's
+  DNS can be that slow while the whole stack starts at once. A `postgres-init`
+  one-shot in `fsc-infra` creates the FSC databases on every `up` and holds
+  their only list, which replaces the initdb script and `make fsc-databases`.
+  `make demo-manager` now seeds the OpenFTV Manager before the rest of the stack
+  starts, so the PDP pulls the policy bundle at boot without a restart.
+- **The PDP reads the DvTP onboarding register live**: contract auto-signing and
+  the integrator mandate check ask the register with `http.send` on every
+  decision that needs it (`policies/gbo/register.rego`), as the consent status
+  already was, instead of OpenFTV pulling it every five seconds. A freshly
+  started PDP therefore decides on the register from its first request, so its
+  healthcheck is the plain `/healthz` and `scripts/wait-openftv-admission.sh`,
+  which waited for the first pull, is gone; so is the pull configuration
+  (`services/openftv-pdp/pip-pull/` and its Helm ConfigMap example; the Helm
+  values now set `GBO_REGISTER_URL`). A change in the register counts from the
+  next decision. When the register does not answer, auto-signing refuses with
+  `ADMISSION_REGISTER_UNAVAILABLE` and a delegated call with
+  `INTEGRATOR_REGISTER_UNAVAILABLE`, where before the PDP went on deciding on
+  the last copy it had pulled. The OpenFSC Manager does not ask again after a
+  refusal, so a contract submitted while the register is down stays pending
+  until it is submitted again.
 - **One table holds the FSC parties' certificate data**: `fsc-infra/peers.txt`
-  lists per party its directory, OIN, subject, host names and internal-CA
-  names. One script, `fsc-infra/pki/bootstrap-peer.sh NAME...`, generates
-  the certificates from it and replaces the ten `bootstrap-<party>.sh`
-  scripts and their `*-internal-ca.json` and `*-internal-cert.json` files;
-  `regenerate-internal-certs.sh` and `make fsc-clean` read the same table,
-  so the certificates of a new party take one row. One target, `make
-  fsc-certs`, generates the certificates of every party in the table and
-  replaces the per-party `fsc-<party>-certs` targets. The generated files,
-  subjects and ownership are unchanged.
+  lists per party its directory, OIN, subject, host names and internal-CA names.
+  One script, `fsc-infra/pki/bootstrap-peer.sh NAME...`, generates the
+  certificates from it and replaces the ten `bootstrap-<party>.sh` scripts and
+  their `*-internal-ca.json` and `*-internal-cert.json` files;
+  `regenerate-internal-certs.sh` and `make fsc-clean` read the same table, so
+  the certificates of a new party take one row. One target, `make fsc-certs`,
+  generates the certificates of every party in the table and replaces the
+  per-party `fsc-<party>-certs` targets. The generated files, subjects and
+  ownership are unchanged.
 - **One template per FSC component in `fsc-infra/docker-compose.yml`**: the
-  Controller, Manager, Inway, Outway, txlog API and their migrations each
-  have one template, and every peer's services add only their own names,
-  certificates, databases and ports. The OpenFSC images and their version
-  are named in one place. The file shrinks from about 1,860 to 1,130 lines;
-  the resolved compose configuration is unchanged.
-- **Credentials without a revocation reference are valid for 24 hours**
-  (#697): the own credential issuer cannot revoke what it issued through
-  login, disclosure-based issuance or an offer without `reference`, so those
+  Controller, Manager, Inway, Outway, txlog API and their migrations each have
+  one template, and every peer's services add only their own names,
+  certificates, databases and ports. The OpenFSC images and their version are
+  named in one place. The file shrinks from about 1,860 to 1,130 lines; the
+  resolved compose configuration is unchanged.
+- **Credentials without a revocation reference are valid for 24 hours** (#697):
+  the own credential issuer cannot revoke what it issued through login,
+  disclosure-based issuance or an offer without `reference`, so those
   credentials are short-lived (ARF VCR_01b). The test PID through the
-  test-person login gets a random reference per issuance and keeps its
-  validity.
-- **A party's pseudonym is the same across its key sets** (#597): the
-  BSNk mock derives a pseudonym from the citizen and the party's OIN only,
-  as BSNk-PP does. A VP is still bound to its key set version: after new keys
-  the VPs have to be made again, but they decrypt to the same pseudonym. The
-  source sidecar now takes `decodedPseudonym.pseudonymValue` as the source's
-  pseudonym instead of the whole decoded structure, which names the key set
-  version too, so a source keeps its pseudonym of a citizen across new keys.
-- **Both demo providers ask consent through a pushed request** (#427, #648):
-  the dienstverlener-mock (Hypotheek-BV) and the keyper-mock (Installatie
-  Register) no longer build a portal URL with the whole request. Their start
-  buttons call their backend's `POST /api/consent/start` and follow the
-  portal address it answers with; their return pages read the code (or
-  error) and the state once, take them out of the address bar and hand them
-  to `POST /api/consent/complete`. Neither mock keeps a consent token or
-  code in the browser; the keyper-mock's demo state in `sessionStorage`
-  holds only the consent's id. The name and purpose on the consent screen
-  come from each provider's registration.
-  - `POST /api/dvtp/query` of `dienstverlener-backend` and `ir-backend` uses
-    the session's consent token when the body has no `consent_token`; a
-    token in the body still works.
+  test-person login gets a random reference per issuance and keeps its validity.
+- **A party's pseudonym is the same across its key sets** (#597): the BSNk mock
+  derives a pseudonym from the citizen and the party's OIN only, as BSNk-PP
+  does. A VP is still bound to its key set version: after new keys the VPs have
+  to be made again, but they decrypt to the same pseudonym. The source sidecar
+  now takes `decodedPseudonym.pseudonymValue` as the source's pseudonym instead
+  of the whole decoded structure, which names the key set version too, so a
+  source keeps its pseudonym of a citizen across new keys.
+- **Both demo providers ask consent through a pushed request** (#427, #648): the
+  dienstverlener-mock (Hypotheek-BV) and the keyper-mock (Installatie Register)
+  no longer build a portal URL with the whole request. Their start buttons call
+  their backend's `POST /api/consent/start` and follow the portal address it
+  answers with; their return pages read the code (or error) and the state once,
+  take them out of the address bar and hand them to
+  `POST /api/consent/complete`. Neither mock keeps a consent token or code in
+  the browser; the keyper-mock's demo state in `sessionStorage` holds only the
+  consent's id. The name and purpose on the consent screen come from each
+  provider's registration.
+  - `POST /api/dvtp/query` of `dienstverlener-backend` and `ir-backend` uses the
+    session's consent token when the body has no `consent_token`; a token in the
+    body still works.
   - The DvTP onboarding register's built-in demo configuration needs
     `DIENSTVERLENER_PUBLIC_URL` and `KEYPER_PUBLIC_URL` for the providers'
     return locations; Compose passes both, a deployment that uses that
     configuration must set them.
-  - With their admission to the consent register's peer, the two demo
-    providers (`…0300`, `…1000`) can also connect to the FSC service
-    `consent-status`: the consent register's Manager signs per peer, not per
-    service. Consent ids are random, so a provider finds only a consent whose
-    id it already has, and a lookup that finds one is logged with the
-    provider as the processor.
-  - No other site may frame the toestemmingsportaal: the Vite dev server and
-    the nginx image send `Content-Security-Policy: frame-ancestors 'none'`
-    and `X-Frame-Options: DENY`, because the consent screen grants with one
-    click.
-- **The test PID carries PID metadata and, for EUDI wallets, `iss`** (#682):
-  the own credential issuer adds `issuing_authority` (`GBO Demo`) and
+  - With their admission to the consent register's peer, the two demo providers
+    (`…0300`, `…1000`) can also connect to the FSC service `consent-status`: the
+    consent register's Manager signs per peer, not per service. Consent ids are
+    random, so a provider finds only a consent whose id it already has, and a
+    lookup that finds one is logged with the provider as the processor.
+  - No other site may frame the toestemmingsportaal: the Vite dev server and the
+    nginx image send `Content-Security-Policy: frame-ancestors 'none'` and
+    `X-Frame-Options: DENY`, because the consent screen grants with one click.
+- **The test PID carries PID metadata and, for EUDI wallets, `iss`** (#682): the
+  own credential issuer adds `issuing_authority` (`GBO Demo`) and
   `issuing_country` (`NL`), the mandatory PID metadata of CIR 2024/2977 as
-  amended, and the optional `date_of_expiry`. The NL Wallet's preview
-  carries them too. For EUDI wallets the test PID also carries `iss`, its
-  credential issuer identifier, which its issuer certificate now names as a
-  SAN URI; the NL Wallet gets no `iss`. **Upgrade:** `make
-  provision-test-pid` now requires `ISSUER_PUBLIC_URL`. Run it again for an
-  environment provisioned before, with that environment's issuer URL, then
-  rematerialize the issuer configuration (`make credential-issuer-up`, or
-  the deployment's materializer) and deploy the new `eudi-credential-issuer`
-  image. The test PID root and the trust lists stay the same.
-- **The idle demo uses less CPU**: container healthchecks probe every 2 s
-  while a container starts and every 30 s once it is healthy, instead of
-  every 5 s throughout (`HEALTHCHECK_INTERVAL`). The Go services no longer
-  trace `/health`, so healthchecks stop filling Jaeger with spans. The demo
-  now needs Docker Engine 25 or newer. The Postgres healthchecks probe
-  over TCP, so they no longer report ready while the init scripts run.
+  amended, and the optional `date_of_expiry`. The NL Wallet's preview carries
+  them too. For EUDI wallets the test PID also carries `iss`, its credential
+  issuer identifier, which its issuer certificate now names as a SAN URI; the NL
+  Wallet gets no `iss`. **Upgrade:** `make provision-test-pid` now requires
+  `ISSUER_PUBLIC_URL`. Run it again for an environment provisioned before, with
+  that environment's issuer URL, then rematerialize the issuer configuration
+  (`make credential-issuer-up`, or the deployment's materializer) and deploy the
+  new `eudi-credential-issuer` image. The test PID root and the trust lists stay
+  the same.
+- **The idle demo uses less CPU**: container healthchecks probe every 2 s while
+  a container starts and every 30 s once it is healthy, instead of every 5 s
+  throughout (`HEALTHCHECK_INTERVAL`). The Go services no longer trace
+  `/health`, so healthchecks stop filling Jaeger with spans. The demo now needs
+  Docker Engine 25 or newer. The Postgres healthchecks probe over TCP, so they
+  no longer report ready while the init scripts run.
 - **`scripts/gen-rules-json.sh` uses the pinned OPA image** (by digest), the
   same one as `make policy-test` and CI.
-- **`make` prints the demo URLs on `GBO_PUBLIC_HOST`** (default
-  `localhost`), instead of localhost and the first `hostname -I` address,
-  which does not exist on macOS.
-- **The developer portal's EUDI chain names both routes** (#614): the
-  first links read "Wallet" (NL Wallet / EUDI-wallet) and "Uitgever"
-  (`eudi-issuance-server` / `eudi-credential-issuer`), as a watched trace
-  does not say which route ran. The hint at the EU-wallet QR says the
-  wallet opens "Geen gegevens gevonden" when the source does not know the
-  BSN.
+- **`make` prints the demo URLs on `GBO_PUBLIC_HOST`** (default `localhost`),
+  instead of localhost and the first `hostname -I` address, which does not exist
+  on macOS.
+- **The developer portal's EUDI chain names both routes** (#614): the first
+  links read "Wallet" (NL Wallet / EUDI-wallet) and "Uitgever"
+  (`eudi-issuance-server` / `eudi-credential-issuer`), as a watched trace does
+  not say which route ran. The hint at the EU-wallet QR says the wallet opens
+  "Geen gegevens gevonden" when the source does not know the BSN.
 - **The bronpoort answers an unknown source or type with 503** (#614):
-  `eudi-adapter` answered `404` both when the source had no data for the
-  person and when it did not know the source or type in the path. An issuer
-  reads 404 as "no data", so a configuration out of step with the active
-  Source Release told the citizen there was nothing. An unknown source or
-  type is now `503`; no data stays `404`.
-- **The README's quick start starts the DvTP demo, and the walkthrough
-  matches the demo**: the quick start lists the five passwords every mode
-  needs, `FTV_POSTGRES_PASSWORD` and `FTV_ADL_READER_PASSWORD` included, and
-  starts with `make demo`, which needs no public URLs, trust anchors or
-  wallet; the EUDI preparation moved to its own section before
-  `make demo-full`. The DvTP walkthrough starts at the consumer mock, explains
-  the DigiD mock sign-in, and repeats the query after revocation with
-  **↻ Verversen**. TROUBLESHOOTING explains the FSC password failure in a
-  second checkout on the same machine.
+  `eudi-adapter` answered `404` both when the source had no data for the person
+  and when it did not know the source or type in the path. An issuer reads 404
+  as "no data", so a configuration out of step with the active Source Release
+  told the citizen there was nothing. An unknown source or type is now `503`; no
+  data stays `404`.
+- **The README's quick start starts the DvTP demo, and the walkthrough matches
+  the demo**: the quick start lists the five passwords every mode needs,
+  `FTV_POSTGRES_PASSWORD` and `FTV_ADL_READER_PASSWORD` included, and starts
+  with `make demo`, which needs no public URLs, trust anchors or wallet; the
+  EUDI preparation moved to its own section before `make demo-full`. The DvTP
+  walkthrough starts at the consumer mock, explains the DigiD mock sign-in, and
+  repeats the query after revocation with **↻ Verversen**. TROUBLESHOOTING
+  explains the FSC password failure in a second checkout on the same machine.
 - **The ASIP names the source and lists its attributes from the source's
-  description** (#592, step 5): the discovery records list the attributes of
-  the source's current description, with its country, and verify and retrieve
-  name the authentic source by the legal name in it: the one of the
-  description the source was asked by. A new release changes them without a
-  restart. Without a current description the discovery records are 503, as
-  verify and retrieve are, and the Data Service Directory leaves them out.
-  `authentic_source`, `country` and `attributes` are gone from
-  `config/dataservices.json`, and the ASIP refuses a file that still has
-  them. A data service whose source is the ASIP itself, naming no authentic
-  source, is no longer possible.
+  description** (#592, step 5): the discovery records list the attributes of the
+  source's current description, with its country, and verify and retrieve name
+  the authentic source by the legal name in it: the one of the description the
+  source was asked by. A new release changes them without a restart. Without a
+  current description the discovery records are 503, as verify and retrieve are,
+  and the Data Service Directory leaves them out. `authentic_source`, `country`
+  and `attributes` are gone from `config/dataservices.json`, and the ASIP
+  refuses a file that still has them. A data service whose source is the ASIP
+  itself, naming no authentic source, is no longer possible.
 - **The ASIP verifies from the source's description** (#592, step 4c): per
-  request it derives one query from the source's `asi` capability, with only
-  the fields of the requested attributes and fragments, and builds the
-  attributes from the answer in the shape of GBO's attribute catalogue, which
-  its image now carries (`ASIP_ATTRIBUTE_CATALOGUE_FILE`). The BRP adapter is
-  gone. Which attributes a data service verifies comes from the description:
-  one it does not describe is 404; `attributes` in `config/dataservices.json`
-  is now a list of identifiers, for the discovery records only. A fragment
-  asks only its own member, so the city of an address without a postcode is
-  `Match`; a fragment on a `const` member, such as the address's country, is
-  `Unknown` without asking the source. An answer of another shape than the
-  description and the value schema expect, such as a birth date that is not a
-  date, is 500. `MatchWithVariation` applies only to strings without a
-  `format`: a birth date matches exactly. A release whose description does not
-  fit the catalogue is one the ASIP cannot read. The query span is now
-  `source query`, with the source as `gbo.asi.source`.
-- **The ASIP reads the sources' descriptions from the Source Registry**
-  (#592, step 4b-2): it reads the active release with the registry's reader
-  role, every `ASIP_SOURCE_REGISTRY_REFRESH` (default 5s). A data service
-  answers `/verify` and `/retrieve` with 503 while its source has no current
-  description: absent from the release, without `asi`, or past its
-  `stale_until`. A release it cannot read, or an unreachable registry, leaves
-  the previous description until it goes stale; the ASIP starts without the
-  registry. Without a registry it reads a release file instead
-  (`ASIP_SOURCE_REGISTRY_RELEASE_FILE`), which `asi-provider
-  write-release-file` writes from a source's published metadata; the
-  end-to-end tests of the reference QTSP and the authorization server use
-  one, and now also run when the ASI services or the modules they use change. In `config/dataservices.json` `source` is now the source's
-  registry id (`rvig`). The ASIP still asks the BRP through its adapter. The
-  ASIP image builds from the repository root; the eudi-adapter's image tag now
-  also covers `asi-mapping` and `source-registry`, so a change to either
-  rebuilds it.
+  request it derives one query from the source's `asi` capability, with only the
+  fields of the requested attributes and fragments, and builds the attributes
+  from the answer in the shape of GBO's attribute catalogue, which its image now
+  carries (`ASIP_ATTRIBUTE_CATALOGUE_FILE`). The BRP adapter is gone. Which
+  attributes a data service verifies comes from the description: one it does not
+  describe is 404; `attributes` in `config/dataservices.json` is now a list of
+  identifiers, for the discovery records only. A fragment asks only its own
+  member, so the city of an address without a postcode is `Match`; a fragment on
+  a `const` member, such as the address's country, is `Unknown` without asking
+  the source. An answer of another shape than the description and the value
+  schema expect, such as a birth date that is not a date, is 500.
+  `MatchWithVariation` applies only to strings without a `format`: a birth date
+  matches exactly. A release whose description does not fit the catalogue is one
+  the ASIP cannot read. The query span is now `source query`, with the source as
+  `gbo.asi.source`.
+- **The ASIP reads the sources' descriptions from the Source Registry** (#592,
+  step 4b-2): it reads the active release with the registry's reader role, every
+  `ASIP_SOURCE_REGISTRY_REFRESH` (default 5s). A data service answers `/verify`
+  and `/retrieve` with 503 while its source has no current description: absent
+  from the release, without `asi`, or past its `stale_until`. A release it
+  cannot read, or an unreachable registry, leaves the previous description until
+  it goes stale; the ASIP starts without the registry. Without a registry it
+  reads a release file instead (`ASIP_SOURCE_REGISTRY_RELEASE_FILE`), which
+  `asi-provider write-release-file` writes from a source's published metadata;
+  the end-to-end tests of the reference QTSP and the authorization server use
+  one, and now also run when the ASI services or the modules they use change. In
+  `config/dataservices.json` `source` is now the source's registry id (`rvig`).
+  The ASIP still asks the BRP through its adapter. The ASIP image builds from
+  the repository root; the eudi-adapter's image tag now also covers
+  `asi-mapping` and `source-registry`, so a change to either rebuilds it.
 - **The Source Registry is a module of its own** (#592, step 4b-1): its model
   and its Postgres store moved unchanged from the eudi-adapter to
   `services/source-registry`, so the ASIP can read the active release with the
   same code. The eudi-adapter still onboards sources and writes the registry;
   its behaviour does not change.
 - **The ASI authorization server's pages get a government look** (#336): the
-  coat of arms, the ribbon and Rijksblauw of the demo's consent portal,
-  without an organisation's name, replace NL Design System's Voorbeeld theme,
-  so the login and consent service is told apart from the QTSP. The request
-  page names the QTSP that gets consent, what it learns, and that the citizen
-  logs in at this service, not at the QTSP; "Weigeren" is now "Geen
-  toestemming geven".
-- **The reference QTSP folds the seal check away** (#336): a valid seal is
-  shown under "Technische details", with the organisation that sealed it;
-  an invalid seal stays in view.
+  coat of arms, the ribbon and Rijksblauw of the demo's consent portal, without
+  an organisation's name, replace NL Design System's Voorbeeld theme, so the
+  login and consent service is told apart from the QTSP. The request page names
+  the QTSP that gets consent, what it learns, and that the citizen logs in at
+  this service, not at the QTSP; "Weigeren" is now "Geen toestemming geven".
+- **The reference QTSP folds the seal check away** (#336): a valid seal is shown
+  under "Technische details", with the organisation that sealed it; an invalid
+  seal stays in view.
 - **The reference QTSP's request page offers products** (#336): "Wat wilt u
-  laten verifiëren?" with cards instead of JSON fields. Adres is filled in
-  field by field; Standplaatsvergunning is shown as coming soon. The page only
+  laten verifiëren?" with cards instead of JSON fields. Adres is filled in field
+  by field; Standplaatsvergunning is shown as coming soon. The page only
   verifies; the request API keeps retrieval and every attribute for the
   developer portal. The QTSP's pages get a green look of their own, so it is
   told apart from the authorization server and the government portals.
 - **The DvTP flow no longer sends `X-GBO-Scope`** (#483). The PDP checks BD
-  years and LVG's fixed scope against the verified consent. The BD source
-  names LDV activities from the processed year; LVG uses its fixed ownership
-  activity. A query for an unconsented year still returns `YEAR_NOT_COVERED`.
-  LVG's configuration name changes from `LDV_SCOPE_ACTIVITY_BASE` to
+  years and LVG's fixed scope against the verified consent. The BD source names
+  LDV activities from the processed year; LVG uses its fixed ownership activity.
+  A query for an unconsented year still returns `YEAR_NOT_COVERED`. LVG's
+  configuration name changes from `LDV_SCOPE_ACTIVITY_BASE` to
   `LDV_ACTIVITY_BASE`; the old name remains a fallback for existing deployments.
-- **The ASI authorization server's DigiD mock looks like the toestemmingsportaal's**:
-  first the choice of a method, then the form, prefilled with the BSN of test
-  person Frouke Jansen (999991772). Still without script; the CSP now allows
-  images from the server itself.
-- **The landing page uses the ICTU-GBO house-style colours.** Blue is
-  `#2e62e6`, the accessible variant of ICTU blue (5.2:1 on white, where
-  `#457aff` reaches only 3.8:1); dark sections, the footer and the wallet QR
-  use `#0e2b84`; hover is the darker blue `#2651bd` instead of magenta. The
-  stream tints follow the palette: blue for DvTP, purple for EUDI, light blue
-  for OOTS.
-- **A consent token carries an encrypted identity per source, and no PI.**
-  The service provider holds no identifier of the citizen: its query names the
+- **The ASI authorization server's DigiD mock looks like the
+  toestemmingsportaal's**: first the choice of a method, then the form,
+  prefilled with the BSN of test person Frouke Jansen (999991772). Still without
+  script; the CSP now allows images from the server itself.
+- **The landing page uses the ICTU-GBO house-style colours.** Blue is `#2e62e6`,
+  the accessible variant of ICTU blue (5.2:1 on white, where `#457aff` reaches
+  only 3.8:1); dark sections, the footer and the wallet QR use `#0e2b84`; hover
+  is the darker blue `#2651bd` instead of magenta. The stream tints follow the
+  palette: blue for DvTP, purple for EUDI, light blue for OOTS.
+- **A consent token carries an encrypted identity per source, and no PI.** The
+  service provider holds no identifier of the citizen: its query names the
   subject with the placeholder `consent:identity`, and the source puts the BSN
   in its place after the PDP has allowed the request. This covers every DvTP
   source in the demo. See [docs/consent-flow.md](docs/consent-flow.md).
   - **Consent.** The portal activates the BSN at BSNk and has it transformed
     into encrypted values for each source in `CONSENT_SOURCES`
     (`<OIN>@<key set version>`), through `bsnk-mock`'s `/v2/activate` and
-    `/v2/transform`. The token's `pi` claim is replaced by
-    `encrypted_subject`, keyed by the party's OIN. The portal does not start
-    with a key set version that is not a real date, or with a source named
-    twice.
+    `/v2/transform`. The token's `pi` claim is replaced by `encrypted_subject`,
+    keyed by the party's OIN. The portal does not start with a key set version
+    that is not a real date, or with a source named twice.
   - **PDP.** `DVT0001` and `LVG0001` require the subject argument to be the
     placeholder. A literal value is denied with `CONSTRAINT_MISMATCH`. The
     placeholder stands for the subject of a verified consent only, and a token
     without `encrypted_subject` is refused with `CONSENT_CONTEXT_INVALID`.
   - **Two placeholders (#473).** `consent:identity` asks for the BSN,
     `consent:pseudonym` for the source's own pseudonym of the citizen; they
-    replace `consent:subject`. Each rule lists the placeholders its API
-    accepts (`placeholders` in its `constraint_binding`), and any other value
-    is denied with `CONSTRAINT_MISMATCH`. `DVT0001` and `LVG0001` accept
+    replace `consent:subject`. Each rule lists the placeholders its API accepts
+    (`placeholders` in its `constraint_binding`), and any other value is denied
+    with `CONSTRAINT_MISMATCH`. `DVT0001` and `LVG0001` accept
     `consent:identity`. Each query kind of `dienstverlener-backend` names the
     placeholder it sends.
-  - **A pseudonym for every source, an identity for the listed ones
-    (#473).** `encrypted_subject` holds, per OIN, a `pseudonym` and, for a
-    source on BSNk's BSN authorisation list, an `identity`, each with
-    `key_set_version` and `value`; `identifier_type` is gone. The portal reads
-    the list (`/v2/bsn-authorisation-list`), uses its copy for at most
-    `BSN_AUTHORISATION_LIST_MAX_AGE` (default `1h`), and gives no consent on
-    an out-of-date copy it cannot renew. It transforms once per form, with at
-    most four parties per request, so a consent with five or more sources
-    works. The register refuses a party without a pseudonym, and so does the
-    PDP (`CONSENT_CONTEXT_INVALID`), also for tokens issued before this
-    change. With `consent:pseudonym`, `bron-sidecar` has the
-    decryption component read the pseudonym (`/signed-encrypted-pseudonym`)
-    and puts the source's own pseudonym in place; the demo keys gain the EP
-    Decryption and EP Closing key files. No rule accepts `consent:pseudonym`
-    yet.
+  - **A pseudonym for every source, an identity for the listed ones (#473).**
+    `encrypted_subject` holds, per OIN, a `pseudonym` and, for a source on
+    BSNk's BSN authorisation list, an `identity`, each with `key_set_version`
+    and `value`; `identifier_type` is gone. The portal reads the list
+    (`/v2/bsn-authorisation-list`), uses its copy for at most
+    `BSN_AUTHORISATION_LIST_MAX_AGE` (default `1h`), and gives no consent on an
+    out-of-date copy it cannot renew. It transforms once per form, with at most
+    four parties per request, so a consent with five or more sources works. The
+    register refuses a party without a pseudonym, and so does the PDP
+    (`CONSENT_CONTEXT_INVALID`), also for tokens issued before this change. With
+    `consent:pseudonym`, `bron-sidecar` has the decryption component read the
+    pseudonym (`/signed-encrypted-pseudonym`) and puts the source's own
+    pseudonym in place; the demo keys gain the EP Decryption and EP Closing key
+    files. No rule accepts `consent:pseudonym` yet.
   - **Source.** `bron-sidecar` acts on the consent token, not on the
     `subject_id_type` grant property. It takes the value for its own OIN from
     the token, has the source's decryption component read it, accepts it only
     when the value itself names that OIN, and replaces the placeholder. It no
     longer calls BSNk. A request without a consent token passes through
-    unchanged. New settings: `DECRYPTION_URL` and `SUBJECT_KEYS_DIR`;
-    `BSNK_URL` and `LDV_BSNK_NEXT_LOGBOOK_ID` are gone from the sidecar, and
+    unchanged. New settings: `DECRYPTION_URL` and `SUBJECT_KEYS_DIR`; `BSNK_URL`
+    and `LDV_BSNK_NEXT_LOGBOOK_ID` are gone from the sidecar, and
     `LDV_RESOLUTION_ACTIVITY` is now `LDV_DECRYPTION_ACTIVITY`.
-  - **Only the Inways reach the sidecars.** The sidecars act on a consent
-    token after the PDP's allow, so a caller that reached them directly would
-    skip the PDP. They now publish no port (`GBO_PORT_*_SIDECAR` are gone)
-    and sit on two networks only: `source-gateways`, shared with `bd-inway`
-    and `brp-inway` and owned by the fsc-infra project
-    (`FSC_SOURCE_GATEWAY_NETWORK`, which make derives from
-    `FSC_PROJECT_NAME`), and `sources`, with the source services, the
-    decryption component and the logbooks. No service provider is on either.
+  - **Only the Inways reach the sidecars.** The sidecars act on a consent token
+    after the PDP's allow, so a caller that reached them directly would skip the
+    PDP. They now publish no port (`GBO_PORT_*_SIDECAR` are gone) and sit on two
+    networks only: `source-gateways`, shared with `bd-inway` and `brp-inway` and
+    owned by the fsc-infra project (`FSC_SOURCE_GATEWAY_NETWORK`, which make
+    derives from `FSC_PROJECT_NAME`), and `sources`, with the source services,
+    the decryption component and the logbooks. No service provider is on either.
     The source services stay reachable for the GraphQL playground.
   - **Decryption component.** A new `decryption-component` service runs the
     `bsnk-mock` image with `DECRYPTION_COMPONENT_ONLY=true`, which serves the
-    decryption endpoints and nothing of BSNk. The sources' demo keys are in
-    the sidecar image (`services/bron-sidecar/config/demo-keys`); a deployment
+    decryption endpoints and nothing of BSNk. The sources' demo keys are in the
+    sidecar image (`services/bron-sidecar/config/demo-keys`); a deployment
     mounts its own.
   - **Logbooks.** The service provider logs under the consent id
     (`data_subject_id_type` `consent-id`). The source's record of reading the
     identity is `identiteit-ontsleuteling` (was `pi-bsn-resolutie`) and points
     to no other logbook.
-  - **The portal activates a citizen once.** Its own reference to a citizen
-    is an HMAC of the BSN under a secret (`SUBJECT_REF_KEY`, with
+  - **The portal activates a citizen once.** Its own reference to a citizen is
+    an HMAC of the BSN under a secret (`SUBJECT_REF_KEY`, with
     `SUBJECT_REF_KEY_VERSION` in every reference), instead of a hash from
     `bsnk-mock` that anyone with a list of BSNs could recompute. The consent
-    register keeps the polymorphic values of a citizen's first activation
-    under that reference (`/subjects/{ref}/polymorphic`, for the portal only).
-    A first consent activates; every consent after it only transforms.
-    Showing and revoking consents no longer call BSNk. Consents given before
-    this change are listed under their old reference and no longer show up
-    for the citizen.
+    register keeps the polymorphic values of a citizen's first activation under
+    that reference (`/subjects/{ref}/polymorphic`, for the portal only). A first
+    consent activates; every consent after it only transforms. Showing and
+    revoking consents no longer call BSNk. Consents given before this change are
+    listed under their old reference and no longer show up for the citizen.
   - **`bsnk-mock`.** The first interface is gone: `/transform` and
     `/pseudonymize`. Its key files are labelled `BSNK MOCK DV KEY` instead of
-    `EC PRIVATE KEY`: they hold no key, and the old label made secret
-    scanners report them as private keys.
-  - **Developer portal.** The use chain shows the source's decryption
-    component in place of BSNk.
+    `EC PRIVATE KEY`: they hold no key, and the old label made secret scanners
+    report them as private keys.
+  - **Developer portal.** The use chain shows the source's decryption component
+    in place of BSNk.
 - The local FSC Postgres allows 300 connections instead of 100. Every peer's
-  Controller, Manager and txlog pool shares that one server, and the tenth
-  peer (the integrator) ran it out.
+  Controller, Manager and txlog pool shares that one server, and the tenth peer
+  (the integrator) ran it out.
 - **A source defines each claim once.** An attestation's `mapping`,
   `attribute_schema` and `type_metadata` are replaced by `display` and one
-  `claims` object, where each claim carries its `gbo-simple-v1` rule as
-  `source` plus `label`, optional `description` and `sd` (default `always`).
-  GBO generates the Type Metadata: `schema.required` is now exactly the
-  non-optional claims, and every claim gets `svg_id` equal to its name. `unit`
-  is dropped; `schema_version` stays `1.0`. The example documents move to the
-  new shape with a bumped `type_version`. See
+  `claims` object, where each claim carries its `gbo-simple-v1` rule as `source`
+  plus `label`, optional `description` and `sd` (default `always`). GBO
+  generates the Type Metadata: `schema.required` is now exactly the non-optional
+  claims, and every claim gets `svg_id` equal to its name. `unit` is dropped;
+  `schema_version` stays `1.0`. The example documents move to the new shape with
+  a bumped `type_version`. See
   [docs/source-onboarding.md](docs/source-onboarding.md#claims-en-type-metadata).
-- **The toestemmingsportaal shows only the scopes the dienstverlener asks
-  for.** It parsed `scope` from the redirect but rendered and granted every
-  scope it knew. A scope it cannot describe now refuses the request instead
-  of being dropped.
+- **The toestemmingsportaal shows only the scopes the dienstverlener asks for.**
+  It parsed `scope` from the redirect but rendered and granted every scope it
+  knew. A scope it cannot describe now refuses the request instead of being
+  dropped.
 - **A consent's purpose comes from the dienstverlener.** The portal passes the
   redirect's `purpose` on as `use_case`; the register no longer labels every
   consent `hypotheek`, which stays the default when none is sent.
-- **Mijn toestemmingen names Hypotheek-BV again.** The name table still keyed
-  on an OIN from before the Peer-ID migration, so the list showed the raw
-  Peer ID.
+- **Mijn toestemmingen names Hypotheek-BV again.** The name table still keyed on
+  an OIN from before the Peer-ID migration, so the list showed the raw Peer ID.
 - **The PDP asks a consent's status over FSC
   ([#383](https://github.com/ICTU/GBO-demo/issues/383)).** Until now anyone who
   could reach the consent register and knew a `consent_id` got its status.
@@ -955,20 +923,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     listener no longer answers `/consents/{id}/status`.
   - A lookup without an FSC peer in `Fsc-Authorization` gets a 401. The LDV
     record's `processor` is that peer.
-  - Two new FSC peers: the consent register (`…0700`, `cr-*`, an Inway) and
-    the shared PDP (`…0800`, `pdp-*`, an Outway). The register's Manager signs
-    a connection only for a peer admitted to it in the onboarding register,
-    which admits the PDP's peer and nothing else. `make fsc-seed-consent-status`
-    seeds the service, the contracts and the Outway's `/consent-status`
-    grant-link; `make demo-dvtp` and `make demo-full` run it.
-  - The policy fetches the JWKS from the register directly
-    (`GBO_CONSENT_URL`) and the status through the Outway
-    (`GBO_CONSENT_STATUS_URL`).
-  - The contract is the authorization: any connected peer may ask the status
-    of a consent whose id it holds. Whether it is the PDP of the consent's
-    source is not checked.
-  - Existing local FSC environments need `make fsc-databases` (or a new
-    volume) for the new peers' databases; `make fsc-all-up` runs it.
+  - Two new FSC peers: the consent register (`…0700`, `cr-*`, an Inway) and the
+    shared PDP (`…0800`, `pdp-*`, an Outway). The register's Manager signs a
+    connection only for a peer admitted to it in the onboarding register, which
+    admits the PDP's peer and nothing else. `make fsc-seed-consent-status` seeds
+    the service, the contracts and the Outway's `/consent-status` grant-link;
+    `make demo-dvtp` and `make demo-full` run it.
+  - The policy fetches the JWKS from the register directly (`GBO_CONSENT_URL`)
+    and the status through the Outway (`GBO_CONSENT_STATUS_URL`).
+  - The contract is the authorization: any connected peer may ask the status of
+    a consent whose id it holds. Whether it is the PDP of the consent's source
+    is not checked.
+  - Existing local FSC environments need `make fsc-databases` (or a new volume)
+    for the new peers' databases; `make fsc-all-up` runs it.
 - **The Authorization Decision Log is the audit source for authorization
   decisions, and the developer portal reads it**
   ([#332](https://github.com/ICTU/GBO-demo/issues/332)). The ADL record holds
@@ -978,92 +945,93 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   stays in the embedded OPA's console decision log, which the portal now shows
   as observability next to the ADL record rather than as the decision.
   - `dev-portal-backend` serves `GET /decisions?transaction_id=` with the ADL
-    records and the console entries side by side, each part with its own
-    error. `part=audit` and `part=engine` fetch one part each, so the PDP's
-    colour, its reason code and the popover's ADL block never wait for Loki.
-    It replaces `/decision` and `/explain`. `/explain?mode=full|fails`
-    is gone rather than left as a TODO: OpenFTV has no explain API, and
-    replaying a recorded input would not reproduce the decision, because the
-    policy fetches the consent status while it evaluates.
+    records and the console entries side by side, each part with its own error.
+    `part=audit` and `part=engine` fetch one part each, so the PDP's colour, its
+    reason code and the popover's ADL block never wait for Loki. It replaces
+    `/decision` and `/explain`. `/explain?mode=full|fails` is gone rather than
+    left as a TODO: OpenFTV has no explain API, and replaying a recorded input
+    would not reproduce the decision, because the policy fetches the consent
+    status while it evaluates.
   - The portal reads the ADL with a SELECT-only role, `adl_reader`, which the
     one-shot `postgres-ftv-init` creates on every `up`
-    (`FTV_ADL_READER_PASSWORD`, required like `FTV_POSTGRES_PASSWORD`; there
-    is no default). The PDP node is coloured
-    by the ADL record alone.
+    (`FTV_ADL_READER_PASSWORD`, required like `FTV_POSTGRES_PASSWORD`; there is
+    no default). The PDP node is coloured by the ADL record alone.
   - Behind the FSC Inway the ADL record carries neither the request's trace nor
-    `adl.fsc.transaction_id` ([#369](https://github.com/ICTU/GBO-demo/issues/369)).
-    The portal finds it through the `Fsc-Transaction-Id` header in the
-    recorded request, and says which of the two matched.
-  - `policies/authz.rego` documents this contract, and tests pin it: `reason`
-    is the reason code, bare, and absent on an allow.
-- **The consent lookup moved out of the request-mapper and into the policy.** The
-  policy verifies the signed consent token and asks the consent register for the
-  consent's status itself, per evaluation, through `http.send`
+    `adl.fsc.transaction_id`
+    ([#369](https://github.com/ICTU/GBO-demo/issues/369)). The portal finds it
+    through the `Fsc-Transaction-Id` header in the recorded request, and says
+    which of the two matched.
+  - `policies/authz.rego` documents this contract, and tests pin it: `reason` is
+    the reason code, bare, and absent on an allow.
+- **The consent lookup moved out of the request-mapper and into the policy.**
+  The policy verifies the signed consent token and asks the consent register for
+  the consent's status itself, per evaluation, through `http.send`
   ([#330](https://github.com/ICTU/GBO-demo/issues/330)). FTV places attribute
-  retrieval inside the PDP; the mapper now only reshapes the request it was given
-  and holds no consent-register URL, JWKS handling or consent claim shaping, which
-  unblocks [#331](https://github.com/ICTU/GBO-demo/issues/331).
+  retrieval inside the PDP; the mapper now only reshapes the request it was
+  given and holds no consent-register URL, JWKS handling or consent claim
+  shaping, which unblocks [#331](https://github.com/ICTU/GBO-demo/issues/331).
   - `policies/dvtp/gbo/consent.rego` resolves `pip.consent` in the shape the
     cascade already read. The status request carries no cache directive, so a
     revoked consent denies on the first request after revocation; OPA caches
-    identical calls within one evaluation, so many fields still cost one call. The
-    JWKS is cached for five minutes and refetched on an unknown `kid`. The bounded
-    stale-key fallback during a JWKS outage is gone: the register serves both the
-    keys and the status, so an outage denied anyway.
+    identical calls within one evaluation, so many fields still cost one call.
+    The JWKS is cached for five minutes and refetched on an unknown `kid`. The
+    bounded stale-key fallback during a JWKS outage is gone: the register serves
+    both the keys and the status, so an outage denied anyway.
   - The status request keeps the trace context #365 gave it: a `traceparent`
     with the request's trace — the caller's, else the transaction id — and a
     fresh span for the lookup, next to `Fsc-Transaction-Id`.
   - The token is verified with `io.jwt.verify_es256` against the key its `kid`
     names, and its claims are checked in Rego — not with `io.jwt.decode_verify`,
-    which reports every failure as one `false` and has no clock-skew leeway. Each
-    failure now denies with a reason of its own: `CONSENT_SIGNATURE_INVALID`
-    (forged, tampered, not ES256, unknown key), `CONSENT_TOKEN_EXPIRED`,
-    `CONSENT_KEYS_UNAVAILABLE` (JWKS unreachable), and `CONSENT_CONTEXT_INVALID`
-    for any other claim. An unreachable status endpoint still denies with
-    `CONSENT_STATUS_UNAVAILABLE`. Every call has a 2s timeout and
-    `raise_error: false`, so no failure leaves a rule undefined.
+    which reports every failure as one `false` and has no clock-skew leeway.
+    Each failure now denies with a reason of its own:
+    `CONSENT_SIGNATURE_INVALID` (forged, tampered, not ES256, unknown key),
+    `CONSENT_TOKEN_EXPIRED`, `CONSENT_KEYS_UNAVAILABLE` (JWKS unreachable), and
+    `CONSENT_CONTEXT_INVALID` for any other claim. An unreachable status
+    endpoint still denies with `CONSENT_STATUS_UNAVAILABLE`. Every call has a 2s
+    timeout and `raise_error: false`, so no failure leaves a rule undefined.
   - The register's location, issuer and audience stay operator configuration:
-    `GBO_CONSENT_URL`, `GBO_CONSENT_ISSUER` and `GBO_CONSENT_AUDIENCE`, now read by
-    the policy through `opa.runtime().env`, with unchanged defaults.
+    `GBO_CONSENT_URL`, `GBO_CONSENT_ISSUER` and `GBO_CONSENT_AUDIENCE`, now read
+    by the policy through `opa.runtime().env`, with unchanged defaults.
   - A `pip.consent` arriving in input is dropped rather than trusted; the policy
     decides only on a consent it verified itself.
   - What the register answered is not part of `input`, so the decision log no
     longer records it there. The engine puts the resolved consent into its
     response document (`context.pip.consent`), which is logged
-    ([#332](https://github.com/ICTU/GBO-demo/issues/332)). A decision is no longer
-    a pure function of (input, policy, data): replaying one would need OPA's
-    `nd_builtin_cache` in the log, which OpenFTV does not enable.
-  - With BSNk gone as well (#364), the mapper adds no `pip` at all and resolves no
-    attribute. The consent token travels on to the policy in `context.headers`;
-    `hasConsentEvidence` is gone with the rest.
+    ([#332](https://github.com/ICTU/GBO-demo/issues/332)). A decision is no
+    longer a pure function of (input, policy, data): replaying one would need
+    OPA's `nd_builtin_cache` in the log, which OpenFTV does not enable.
+  - With BSNk gone as well (#364), the mapper adds no `pip` at all and resolves
+    no attribute. The consent token travels on to the policy in
+    `context.headers`; `hasConsentEvidence` is gone with the rest.
 - **The PDP's request-mapper only maps.** It no longer calls BSNk and no longer
-  rewrites the subject identifier ([#364](https://github.com/ICTU/GBO-demo/issues/364)).
-  Consent-token verification then moved into the policy too (#330, below), so what
-  remains is GraphQL mapping.
+  rewrites the subject identifier
+  ([#364](https://github.com/ICTU/GBO-demo/issues/364)). Consent-token
+  verification then moved into the policy too (#330, below), so what remains is
+  GraphQL mapping.
   - The EUDI flow keeps sending the plain BSN it reads from the wallet's PID
     disclosure. The mapper used to pseudonymise it through BSNk `/pseudonymize`
-    during evaluation, only to keep it out of the policy input — no rule ever read
-    the resulting PI. `pseudonymizeBSN`, `bsnkURL`, the identifier rewriting and
-    `GBO_BSNK_URL` are gone, and with them the case where a BSNk outage surfaced as
-    the policy reason `PID_NOT_PRESENT`.
-  - **Plain BSNs now reach both PDP decision logs:** OpenFTV's ADL in Postgres, and
-    the console log in Loki that the developer portal reads. That is accepted for the
-    demo, and reverses the guarantee from July's review and #363's scrubbing. Whether
-    to mask the logs or transform the value first is
+    during evaluation, only to keep it out of the policy input — no rule ever
+    read the resulting PI. `pseudonymizeBSN`, `bsnkURL`, the identifier
+    rewriting and `GBO_BSNK_URL` are gone, and with them the case where a BSNk
+    outage surfaced as the policy reason `PID_NOT_PRESENT`.
+  - **Plain BSNs now reach both PDP decision logs:** OpenFTV's ADL in Postgres,
+    and the console log in Loki that the developer portal reads. That is
+    accepted for the demo, and reverses the guarantee from July's review and
+    #363's scrubbing. Whether to mask the logs or transform the value first is
     [#368](https://github.com/ICTU/GBO-demo/issues/368).
-  - The EUDI rules' basis check reads the request itself: *no consent token was
-    presented, and the query names a subject* (`vars.bsn`, the source-declared subject
-    variable). It used to match the shape of the PI the mapper got back, which proved
-    only that BSNk answered — bsnk-mock answers for any string.
-  - `AMBIGUOUS_EVIDENCE` is gone. With the PID regime defined as the absence of a
-    consent token, a request can no longer carry evidence for both.
-- **LDV records take the caller's trace over instead of the FSC transaction
-  id** (#365). `ldv-client` reads `traceparent` before `Fsc-Transaction-Id`,
-  as LDV §3.3.1 and the ADL require; the transaction id is the fallback for a
-  hop that arrives without one. One processing that crosses FSC more than once
-  now keeps one trace id. The bron-sidecar records the caller's span as the
-  forward's parent, and the EUDI adapter hands the source the span of the
-  record that made the call instead of a random one.
+  - The EUDI rules' basis check reads the request itself: _no consent token was
+    presented, and the query names a subject_ (`vars.bsn`, the source-declared
+    subject variable). It used to match the shape of the PI the mapper got back,
+    which proved only that BSNk answered — bsnk-mock answers for any string.
+  - `AMBIGUOUS_EVIDENCE` is gone. With the PID regime defined as the absence of
+    a consent token, a request can no longer carry evidence for both.
+- **LDV records take the caller's trace over instead of the FSC transaction id**
+  (#365). `ldv-client` reads `traceparent` before `Fsc-Transaction-Id`, as LDV
+  §3.3.1 and the ADL require; the transaction id is the fallback for a hop that
+  arrives without one. One processing that crosses FSC more than once now keeps
+  one trace id. The bron-sidecar records the caller's span as the forward's
+  parent, and the EUDI adapter hands the source the span of the record that made
+  the call instead of a random one.
 - **GBO's logbook is split per system** (#365): `logboek-toestemming` for the
   consent register and portal, `logboek-eudi-adapter` for the adapter. GBO's
   register of verwerkingsactiviteiten is split with it, so each logbook accepts
@@ -1073,100 +1041,101 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   lookup, so the status record lands in the request's trace, under that span,
   instead of becoming a root.
 - **The demo consumer logs its own processing** (#365). `dienstverlener-backend`
-  writes each call to a source to `logboek-afnemer`, Hypotheek-BV's own
-  logbook, with a `dpl.read.nextLogbookId` to the source's read API, and hands
-  the source its record's span. The read extension starts a chain at the
-  application that started the processing; whether a private consumer must do
-  this is an open question, so the demo applies it provisionally.
+  writes each call to a source to `logboek-afnemer`, Hypotheek-BV's own logbook,
+  with a `dpl.read.nextLogbookId` to the source's read API, and hands the source
+  its record's span. The read extension starts a chain at the application that
+  started the processing; whether a private consumer must do this is an open
+  question, so the demo applies it provisionally.
 - **The dev-portal's LDV panel follows the chain instead of asking every
-  logbook** (#365). It queries on the request's trace id, starts at the
-  logbooks where a processing starts, and follows `dpl.read.nextLogbookId`;
-  every logbook says how it was reached. A logbook no pointer leads to — the
-  consent register's, whose status the PDP checks — is still queried and shown
-  as such. `LDV_LOGBOOKS` now names each logbook by its read-API URI and marks
-  the start logbooks.
+  logbook** (#365). It queries on the request's trace id, starts at the logbooks
+  where a processing starts, and follows `dpl.read.nextLogbookId`; every logbook
+  says how it was reached. A logbook no pointer leads to — the consent
+  register's, whose status the PDP checks — is still queried and shown as such.
+  `LDV_LOGBOOKS` now names each logbook by its read-API URI and marks the start
+  logbooks.
 - **Records of a call to BSNk point at BSNk** (#365). The sidecars' PI→BSN
   resolution and the consent portal's pseudonymisation set
-  `dpl.read.nextLogbookId` from `LDV_BSNK_NEXT_LOGBOOK_ID`. BSNk has no read
-  API in the demo, so the value is a page about the mock, the fallback the read
+  `dpl.read.nextLogbookId` from `LDV_BSNK_NEXT_LOGBOOK_ID`. BSNk has no read API
+  in the demo, so the value is a page about the mock, the fallback the read
   extension allows for a party without one.
 - **A source names the Betrokkene in its own pseudonym space** (#367). The
   sidecars log the PI→BSN resolution and the forward under a logbook-local
-  pseudonym derived from the BSN with the source's own key, and pass that on
-  to the source, instead of the PI the consumer sent. The PI now appears only
-  in the consumer's logbook, so logbooks of different Verantwoordelijken share
-  no identifier and join on the trace id alone.
+  pseudonym derived from the BSN with the source's own key, and pass that on to
+  the source, instead of the PI the consumer sent. The PI now appears only in
+  the consumer's logbook, so logbooks of different Verantwoordelijken share no
+  identifier and join on the trace id alone.
 - **The EUDI adapter's call to a source stays under its assembly record.** Its
-  client is instrumented, and otelhttp injected its own client span over the
-  LDV position; `ldv.Transport`, placed inside the instrumentation, puts it
-  back. The assembly record is now also written when the source refuses, fails
-  or has no data, so a source's records never hang under a missing parent.
-- **The authorization regime a request is judged under follows from the evidence it
-  carries, not from a `flow` grant property.** No component reads `flow` and no seed
-  writes one; `subject_id_type` stays, because identifier format is not derivable
-  without guessing at it
+  client is instrumented, and otelhttp injected its own client span over the LDV
+  position; `ldv.Transport`, placed inside the instrumentation, puts it back.
+  The assembly record is now also written when the source refuses, fails or has
+  no data, so a source's records never hang under a missing parent.
+- **The authorization regime a request is judged under follows from the evidence
+  it carries, not from a `flow` grant property.** No component reads `flow` and
+  no seed writes one; `subject_id_type` stays, because identifier format is not
+  derivable without guessing at it
   ([#334](https://github.com/ICTU/GBO-demo/issues/334)).
-  - The flow dispatch in `engine.rego` is gone. Every rule already declared its own
-    authorization basis — `consent_required` (DvTP) or `pid_required` (EUDI) — and
-    fails closed without it, so the dispatch was never doing the security work. What
-    it did do was keep the *reason* right, and no test could see that: five new
-    engine-level tests now assert the surfacing deny code in both directions, and
-    with the dispatch simply deleted all five degraded (a consent-based deny surfaced
-    `PID_NOT_PRESENT`, a PID-based deny surfaced `CONSENT_CONTEXT_INVALID` — the top
-    of the priority table).
-  - Reason aggregation replaces it, and is the better fix because it survives the
-    property's removal. `_best_reason` ranks the evaluated rules by how far each got
-    through its own cascade before applying the priority table: a rule whose basis
-    does not fit the request passes nothing, since every axis ahead of its basis
-    check is skipped and the basis check itself fails. All five reasons are
-    unchanged from the dispatch's behaviour. When depth cannot separate the
-    rules — every one passed nothing — the regime the request is under breaks
-    the tie: a consent token puts it under the consent regime, and its absence
-    under the PID regime.
-  - The request-mapper selects the consent regime on a consent token and falls through
-    to the PID regime otherwise. A subject variable cannot discriminate: both regimes
-    carry one, a PI under `subject_id_type=pseudonym` and a raw BSN under `direct`, and
-    telling them apart by identifier shape is the guessing this change removes. The PID
-    regime is therefore entered by *absence*, and its only remaining gate is each EUDI
-    rule's `allowed_actors`; a test asserts that whitelist stays disjoint from the
-    consent-based consumers, because an OIN in both could skip the citizen's consent by
-    omitting the header. `flowFromHeaders`, `isEUDIFlow` and the FSC-token property
-    reader are removed.
-  - The source-metadata path keeps subject, method and endpoint as its gate. The PDP
-    cannot see which FSC service a request arrived on, so this admits one case it did
-    not before: a permitted OIN, on a contract other than the metadata one, issuing
-    `GET /.well-known/gbo`. Accepted deliberately — FSC routes each service to its own
-    upstream and the document is a public service description, so it is the same peer
-    reaching the same class of document — and recorded in the rule.
+  - The flow dispatch in `engine.rego` is gone. Every rule already declared its
+    own authorization basis — `consent_required` (DvTP) or `pid_required` (EUDI)
+    — and fails closed without it, so the dispatch was never doing the security
+    work. What it did do was keep the _reason_ right, and no test could see
+    that: five new engine-level tests now assert the surfacing deny code in both
+    directions, and with the dispatch simply deleted all five degraded (a
+    consent-based deny surfaced `PID_NOT_PRESENT`, a PID-based deny surfaced
+    `CONSENT_CONTEXT_INVALID` — the top of the priority table).
+  - Reason aggregation replaces it, and is the better fix because it survives
+    the property's removal. `_best_reason` ranks the evaluated rules by how far
+    each got through its own cascade before applying the priority table: a rule
+    whose basis does not fit the request passes nothing, since every axis ahead
+    of its basis check is skipped and the basis check itself fails. All five
+    reasons are unchanged from the dispatch's behaviour. When depth cannot
+    separate the rules — every one passed nothing — the regime the request is
+    under breaks the tie: a consent token puts it under the consent regime, and
+    its absence under the PID regime.
+  - The request-mapper selects the consent regime on a consent token and falls
+    through to the PID regime otherwise. A subject variable cannot discriminate:
+    both regimes carry one, a PI under `subject_id_type=pseudonym` and a raw BSN
+    under `direct`, and telling them apart by identifier shape is the guessing
+    this change removes. The PID regime is therefore entered by _absence_, and
+    its only remaining gate is each EUDI rule's `allowed_actors`; a test asserts
+    that whitelist stays disjoint from the consent-based consumers, because an
+    OIN in both could skip the citizen's consent by omitting the header.
+    `flowFromHeaders`, `isEUDIFlow` and the FSC-token property reader are
+    removed.
+  - The source-metadata path keeps subject, method and endpoint as its gate. The
+    PDP cannot see which FSC service a request arrived on, so this admits one
+    case it did not before: a permitted OIN, on a contract other than the
+    metadata one, issuing `GET /.well-known/gbo`. Accepted deliberately — FSC
+    routes each service to its own upstream and the document is a public service
+    description, so it is the same peer reaching the same class of document —
+    and recorded in the rule.
 - **The landing page returns to the palette it was designed in.** The ICTU
   colours introduced in #322 are reverted: `#01689b` carries the page again,
   `#d52b1e` is the hover accent, and the derived tints, connector lines and
-  rails go back with them. Only the colours revert — the reviewed copy, the
-  link to the information site and the fourth outlet in the flow band all stay.
-  The hero also drops "Deze demo laat zien hoe de voorgestelde oplossing werkt
-  in de praktijk" at the programme's request.
+  rails go back with them. Only the colours revert — the reviewed copy, the link
+  to the information site and the fourth outlet in the flow band all stay. The
+  hero also drops "Deze demo laat zien hoe de voorgestelde oplossing werkt in de
+  praktijk" at the programme's request.
 - **The fan in the flow band no longer smears its pulse.** It was drawn in a
-  100×100 viewBox stretched into a 65×236 box with
-  `preserveAspectRatio="none"` — 0.65× horizontally against 2.36× vertically.
-  Dashes are uniform in path coordinates, so under that distortion they
-  streaked along the steep part of each curve. The fan is now drawn in real
-  pixels: a `ResizeObserver` (`useElementSize`) matches the viewBox to the box,
-  making the scale 1:1. The drawing is positioned out of flow, because an SVG
-  that derives its viewBox from its own height and also participates in layout
-  feeds its own measurement back into the row. The rails still meet the labels
-  at 12.5 / 37.5 / 62.5 / 87.5 percent at every width. The straight
-  source-to-GBO line keeps its normalised viewBox: it runs along one axis, so
-  nothing distorts there.
+  100×100 viewBox stretched into a 65×236 box with `preserveAspectRatio="none"`
+  — 0.65× horizontally against 2.36× vertically. Dashes are uniform in path
+  coordinates, so under that distortion they streaked along the steep part of
+  each curve. The fan is now drawn in real pixels: a `ResizeObserver`
+  (`useElementSize`) matches the viewBox to the box, making the scale 1:1. The
+  drawing is positioned out of flow, because an SVG that derives its viewBox
+  from its own height and also participates in layout feeds its own measurement
+  back into the row. The rails still meet the labels at 12.5 / 37.5 / 62.5 /
+  87.5 percent at every width. The straight source-to-GBO line keeps its
+  normalised viewBox: it runs along one axis, so nothing distorts there.
 - **OpenFTV moves to the released v0.1.0.** The demo no longer runs an
   unreleased build: the version tagged on 8 September 2026 contains the Rego
   deny-reason passthrough (FTV-474) the reason cascade was pinned to a bare
   `main` commit for.
   - `openftv-manager` and `openftv-manager-ui` are **pulled, not built**. Both
-    Dockerfiles are gone; compose consumes
-    `…/open-ftv/manager:v0.1.0` and `…/open-ftv/management-interface:v0.1.0`
-    directly. The published Manager image carries no configuration of its own,
-    so its own-API policies, bundle definitions and policy tags are bind-mounted
-    instead of baked in. Neither image is published to ghcr any more.
+    Dockerfiles are gone; compose consumes `…/open-ftv/manager:v0.1.0` and
+    `…/open-ftv/management-interface:v0.1.0` directly. The published Manager
+    image carries no configuration of its own, so its own-API policies, bundle
+    definitions and policy tags are bind-mounted instead of baked in. Neither
+    image is published to ghcr any more.
   - `openftv-pdp` builds from the **`v0.1.0` tag** rather than a bare commit
     sha. It cannot use the published image yet, because the GraphQL
     request-mapper still has to be patched into the binary (#331); the patch is
@@ -1181,174 +1150,174 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     `make demo-manager`. In a shared cluster the ADL wants its own schema
     (`?search_path=…`): it keeps its own migration bookkeeping.
   - Configuration renamed with it: `MANAGER_PERSIST_TYPE` and
-    `MANAGER_PERSIST_POSTGRES_URL` become `MANAGER_DATABASE_URL`,
-    `PDP_ADL_TYPE` and `MANAGER_ADL_TYPE` are gone, and the `*_MIGRATE_SOURCE`
-    / `*_MIGRATE_AUTO` pairs disappear because both apps now migrate on
-    startup from the schema embedded in the binary.
+    `MANAGER_PERSIST_POSTGRES_URL` become `MANAGER_DATABASE_URL`, `PDP_ADL_TYPE`
+    and `MANAGER_ADL_TYPE` are gone, and the `*_MIGRATE_SOURCE` /
+    `*_MIGRATE_AUTO` pairs disappear because both apps now migrate on startup
+    from the schema embedded in the binary.
   - **The PDP's bundle pull needed a policy of its own.** Since v0.1.0 the
     Manager's internal bundle endpoint runs through the same authorizer as its
     UI API. Our Cedar policies are permit-only, and the PDP presents no
     identity, so every retrieval returned 403 and the PDP never received a
     bundle. `services/openftv-manager/authz/pdp-bundle.cedar` permits exactly
-    that one path, read-only.
-    Note when upgrading an existing deployment: the Manager seeds `/authz`
-    into Postgres only while the policy store is empty, and afterwards treats
-    the store as the source of truth. An existing `postgres-ftv` volume
-    therefore will not pick the new policy up — add it through the Manager's
-    API or the management interface, or recreate the volume.
+    that one path, read-only. Note when upgrading an existing deployment: the
+    Manager seeds `/authz` into Postgres only while the policy store is empty,
+    and afterwards treats the store as the source of truth. An existing
+    `postgres-ftv` volume therefore will not pick the new policy up — add it
+    through the Manager's API or the management interface, or recreate the
+    volume.
   - The management interface needs `MANAGER_MAX_LOGO_SIZE`: its bundled nginx
     template interpolates the variable, and nginx refuses to start when it is
     unset. Set to 102400, the value the UI itself falls back to.
-  - The PDP's builder image moves to Go 1.27; OpenFTV v0.1.0 requires 1.26.7
-    or newer.
+  - The PDP's builder image moves to Go 1.27; OpenFTV v0.1.0 requires 1.26.7 or
+    newer.
   - The published images are amd64-only, so on an arm64 host the two Manager
     containers run emulated where they used to be built natively.
 - **The landing page follows the ICTU house style and the programme's own
   wording.** Primary colour moves from Rijkshuisstijl hemelblauw `#01689b` to
-  ICTU `#0e2b84`, and the hover accent from Rijkshuisstijl red `#d52b1e` to
-  ICTU purple `#880095`; the derived tints, connector lines and rails move with
-  them, and every text/background pair now meets WCAG AA, most of them AAA.
-  Purple stays a hover colour, as red was — links themselves remain blue.
-  The hero title leads with "Demo-omgeving", the intro and the "Wat doet GBO?"
-  section take the programme's approved copy, "Wat het oplevert" becomes
-  "Voordelen GBO", and the section links to both the documentation environment
-  and the new information site (gbo.pleio.nl).
+  ICTU `#0e2b84`, and the hover accent from Rijkshuisstijl red `#d52b1e` to ICTU
+  purple `#880095`; the derived tints, connector lines and rails move with them,
+  and every text/background pair now meets WCAG AA, most of them AAA. Purple
+  stays a hover colour, as red was — links themselves remain blue. The hero
+  title leads with "Demo-omgeving", the intro and the "Wat doet GBO?" section
+  take the programme's approved copy, "Wat het oplevert" becomes "Voordelen
+  GBO", and the section links to both the documentation environment and the new
+  information site (gbo.pleio.nl).
   - The flow band gains a fourth outlet, "Nieuwe toepassingen", drawn on a
     dashed rail and without a pulse: nothing runs over it yet. Its fan and its
-    labels now share one grid row and split it into four equal fractions, so
-    the rails meet the labels at every width instead of only where the
-    descriptions happen to fit on one line.
+    labels now share one grid row and split it into four equal fractions, so the
+    rails meet the labels at every width instead of only where the descriptions
+    happen to fit on one line.
   - Colours the drawings used to hardcode are inherited through `currentColor`,
     so `tokens.css` is the only place the palette is written down.
 - Updated the remaining gRPC dependencies to the patched 1.83.1 release.
-- Brought the repository owner, contact and publiccode metadata in line with
-  the ICTU GitHub policy.
+- Brought the repository owner, contact and publiccode metadata in line with the
+  ICTU GitHub policy.
 
 ### Removed
+
 - **Unused code paths are gone.** The `eudi-adapter` no longer writes
-  `source-release.json` next to a materialized configuration; nothing read
-  it. Materializing still prints the release id, and the adapter still logs
-  the release id and materialization digest when it activates a release. The
+  `source-release.json` next to a materialized configuration; nothing read it.
+  Materializing still prints the release id, and the adapter still logs the
+  release id and materialization digest when it activates a release. The
   developer portal drops the oldest decision-log shape (one
   `reason_admin.evaluated` cascade, which no policy emits any more; such a
-  record now shows its raw log only), the unused `fetchTracesByTag`, and
-  span mappings for service names no container reports (`pdp-service`,
-  `opa`, `edi-outway`, `edi-manager`, `bd-inway`). The policy-snippet lookup
-  no longer searches for `deny_reason(`, which only a test file contains,
-  and `fsc-infra/scripts/lib.sh` drops the uncalled `wait_for_url`.
-- **The URL-based consent flow** (#427, #648): the toestemmingsportaal no
-  longer accepts a consent request in the URL. The request context on
-  `/auth`, the routes `/consent` and `/bevestiging`, the redirect context in
-  `sessionStorage`, the allow-list of return origins
-  (`ALLOWED_RETURN_ORIGINS`, `VITE_ALLOWED_RETURN_ORIGINS`) and the portal's
-  runtime configuration (`runtime-config.js`) are gone; the consent token no
-  longer comes back in a URL fragment. A provider starts a consent flow with
-  a pushed request and `/toestemming/start`. "Annuleren" at the login always
-  goes to the consents overview. The dienstverlener-mock no longer has a
-  runtime configuration (`CONSENT_PORTAL_URL`, `CONSUMER_PEER_ID`), and the
-  keyper-mock no longer reads `CONSUMER_PEER_ID`.
+  record now shows its raw log only), the unused `fetchTracesByTag`, and span
+  mappings for service names no container reports (`pdp-service`, `opa`,
+  `edi-outway`, `edi-manager`, `bd-inway`). The policy-snippet lookup no longer
+  searches for `deny_reason(`, which only a test file contains, and
+  `fsc-infra/scripts/lib.sh` drops the uncalled `wait_for_url`.
+- **The URL-based consent flow** (#427, #648): the toestemmingsportaal no longer
+  accepts a consent request in the URL. The request context on `/auth`, the
+  routes `/consent` and `/bevestiging`, the redirect context in
+  `sessionStorage`, the allow-list of return origins (`ALLOWED_RETURN_ORIGINS`,
+  `VITE_ALLOWED_RETURN_ORIGINS`) and the portal's runtime configuration
+  (`runtime-config.js`) are gone; the consent token no longer comes back in a
+  URL fragment. A provider starts a consent flow with a pushed request and
+  `/toestemming/start`. "Annuleren" at the login always goes to the consents
+  overview. The dienstverlener-mock no longer has a runtime configuration
+  (`CONSENT_PORTAL_URL`, `CONSUMER_PEER_ID`), and the keyper-mock no longer
+  reads `CONSUMER_PEER_ID`.
 - The consent detail page no longer shows an "Integrator" field. The DvTP
   requirements no longer ask to tell the citizen about the integrator.
-- **`sector-pip` is gone (#378).** It served sector membership to the old
-  token issuer and PEP; admission now runs through `dvtp-onboarding-register`
-  and the PDP's contract decision, and nothing called the service any more.
-  Its container, CI jobs, published image, Dependabot entry and
+- **`sector-pip` is gone (#378).** It served sector membership to the old token
+  issuer and PEP; admission now runs through `dvtp-onboarding-register` and the
+  PDP's contract decision, and nothing called the service any more. Its
+  container, CI jobs, published image, Dependabot entry and
   `GBO_PORT_SECTOR_PIP` are removed. The developer portal's organisation list
   moved to `services/dev-portal-backend/organizations.json`, which is now also
   baked into the backend image, so `ORGANIZATIONS_FILE` defaults to
   `/organizations.json`.
-- **The `subject_id_type` grant property is gone (#473).** Nothing read it
-  since `bron-sidecar` takes the subject from the consent token. The seeds
-  create service-connection grants without properties (`GRANT_PROPERTIES`
-  defaults to `{}`). Re-running a seed on an existing demo creates a new
-  contract and repoints the grant-link. The logbook no longer accepts the
-  `pi` subject type, which no component wrote, and `ldv-client` drops
-  `SubjectTypePI`.
+- **The `subject_id_type` grant property is gone (#473).** Nothing read it since
+  `bron-sidecar` takes the subject from the consent token. The seeds create
+  service-connection grants without properties (`GRANT_PROPERTIES` defaults to
+  `{}`). Re-running a seed on an existing demo creates a new contract and
+  repoints the grant-link. The logbook no longer accepts the `pi` subject type,
+  which no component wrote, and `ldv-client` drops `SubjectTypePI`.
 
 ### Fixed
-- **The reference QTSP's end-to-end tests clean up after themselves.** They
-  left the service processes they started running and a `qtsp-e2e-*`
-  directory of about 30 MB (built binaries and generated keys) in the temp
-  directory after every run. The tests now stop the processes and remove the
-  directory when they finish, and also when starting the stack fails.
+
+- **The reference QTSP's end-to-end tests clean up after themselves.** They left
+  the service processes they started running and a `qtsp-e2e-*` directory of
+  about 30 MB (built binaries and generated keys) in the temp directory after
+  every run. The tests now stop the processes and remove the directory when they
+  finish, and also when starting the stack fails.
 - **README and TROUBLESHOOTING cover the EUDI setup beyond localhost**: the
-  requirements name Go 1.26 for the host-side provisioning; the CA section
-  says the four CA files are managed material; a port table lists every
-  public URL of the EUDI, own-issuer and ASI routes (and that 9431 stays
-  private); the reverse-proxy section notes that containers call
-  `EUDI_BRI_URL` and `EUDI_TRUST_PUBLIC_URL` themselves; a new section gives
-  the order of the own credential issuer's provisioning steps; and
-  TROUBLESHOOTING explains the `make publish-trust-lists` root error. The
-  placeholder `EUDI_PUBLIC_URL` in `make source-metadata-up` now uses the
-  issuance server's port 18001 instead of 8001, with a comment that the
-  services it starts do not read it.
+  requirements name Go 1.26 for the host-side provisioning; the CA section says
+  the four CA files are managed material; a port table lists every public URL of
+  the EUDI, own-issuer and ASI routes (and that 9431 stays private); the
+  reverse-proxy section notes that containers call `EUDI_BRI_URL` and
+  `EUDI_TRUST_PUBLIC_URL` themselves; a new section gives the order of the own
+  credential issuer's provisioning steps; and TROUBLESHOOTING explains the
+  `make publish-trust-lists` root error. The placeholder `EUDI_PUBLIC_URL` in
+  `make source-metadata-up` now uses the issuance server's port 18001 instead of
+  8001, with a comment that the services it starts do not read it.
 - **The keyper-mock image no longer serves a literal `${VAR}` in
-  `runtime-config.js`.** nginx's envsubst only fills variables that are set,
-  so a container started without `CONSENT_PORTAL_URL` kept the placeholder,
-  which the app took as a value. The Dockerfile now declares the variable
-  empty, as the landing page already did, and the app treats a value that is
-  still a whole `${VAR}` placeholder as unset. The keyper-mock still needs
-  `CONSENT_PORTAL_URL` outside the local demo, for its link to the portal.
-  The dienstverlener-mock and the toestemmingsportaal-frontend no longer
-  have a runtime configuration (see Removed).
-- **`make fsc-clean` works without sudo**: the certificates the containers
-  write as root or uid 1001 could not be deleted by the host user under
-  rootful Docker, nor under rootless Docker (where uid 1001 maps to a
-  subuid), so the target stopped with "Permission denied". It now always
-  deletes them from a local `gbo-demo/pki-tools` container, before
-  `compose down` removes that image. If certificates are left but the image
-  is gone, it stops with a hint to rebuild the image with `make fsc-up`.
-- **Seed and delivery steps stop on errors instead of guessing.** The FSC
-  seed scripts treated an HTTP error from a Manager or Controller as "nothing
-  registered yet" and went on to create the service or contract again; they
-  now stop with the error. The loops that wait for a contract to be signed
-  still retry a failed poll until their timeout. `make demo-manager` stops when the OpenFTV Manager
-  does not become healthy instead of seeding anyway. `make manager-seed` no
-  longer writes a retired policy back without its source when it cannot read
-  the policy. The LDV outbox treats only a missing cursor file as "nothing
-  delivered yet"; an unreadable or empty cursor now stops delivery instead of
-  replaying the whole spool, and is logged as an error that says removing the
-  cursor file replays the outbox (the logbook drops the duplicates).
-- **The LDV logbook sorts and filters by time, not by text.** Times were
-  stored as RFC 3339 with trimmed fraction digits, so `…05.5Z` sorted before
-  `…05Z` and the `startTime`/`endTime` read filters wrongly included or
-  dropped records in the boundary second. Times are now stored with always
-  nine fraction digits; older rows still read, but keep the old order. A
-  demo with existing logbooks needs a reset of the `logboek-*-data` volumes
-  (`make clean`) to get the new order for those rows.
+  `runtime-config.js`.** nginx's envsubst only fills variables that are set, so
+  a container started without `CONSENT_PORTAL_URL` kept the placeholder, which
+  the app took as a value. The Dockerfile now declares the variable empty, as
+  the landing page already did, and the app treats a value that is still a whole
+  `${VAR}` placeholder as unset. The keyper-mock still needs
+  `CONSENT_PORTAL_URL` outside the local demo, for its link to the portal. The
+  dienstverlener-mock and the toestemmingsportaal-frontend no longer have a
+  runtime configuration (see Removed).
+- **`make fsc-clean` works without sudo**: the certificates the containers write
+  as root or uid 1001 could not be deleted by the host user under rootful
+  Docker, nor under rootless Docker (where uid 1001 maps to a subuid), so the
+  target stopped with "Permission denied". It now always deletes them from a
+  local `gbo-demo/pki-tools` container, before `compose down` removes that
+  image. If certificates are left but the image is gone, it stops with a hint to
+  rebuild the image with `make fsc-up`.
+- **Seed and delivery steps stop on errors instead of guessing.** The FSC seed
+  scripts treated an HTTP error from a Manager or Controller as "nothing
+  registered yet" and went on to create the service or contract again; they now
+  stop with the error. The loops that wait for a contract to be signed still
+  retry a failed poll until their timeout. `make demo-manager` stops when the
+  OpenFTV Manager does not become healthy instead of seeding anyway.
+  `make manager-seed` no longer writes a retired policy back without its source
+  when it cannot read the policy. The LDV outbox treats only a missing cursor
+  file as "nothing delivered yet"; an unreadable or empty cursor now stops
+  delivery instead of replaying the whole spool, and is logged as an error that
+  says removing the cursor file replays the outbox (the logbook drops the
+  duplicates).
+- **The LDV logbook sorts and filters by time, not by text.** Times were stored
+  as RFC 3339 with trimmed fraction digits, so `…05.5Z` sorted before `…05Z` and
+  the `startTime`/`endTime` read filters wrongly included or dropped records in
+  the boundary second. Times are now stored with always nine fraction digits;
+  older rows still read, but keep the old order. A demo with existing logbooks
+  needs a reset of the `logboek-*-data` volumes (`make clean`) to get the new
+  order for those rows.
 - **Regenerating the internal FSC certificates covers every peer.**
   `fsc-infra/pki/regenerate-internal-certs.sh` skipped hypotheekverlener-mock
-  and left the new key files owned by root, so the OpenFSC containers (uid
-  1001) could not read them. It now regenerates all ten peers, hands the files
-  to uid 1001 as the bootstrap scripts do, and stops before it changes
-  anything when a `*-internal-cert.json` in `fsc-infra/pki` has no entry in
-  its peer list.
+  and left the new key files owned by root, so the OpenFSC containers (uid 1001)
+  could not read them. It now regenerates all ten peers, hands the files to uid
+  1001 as the bootstrap scripts do, and stops before it changes anything when a
+  `*-internal-cert.json` in `fsc-infra/pki` has no entry in its peer list.
 - **A restarted consent register kept its key ID.** Without a stable key it
   generates a new signing key at every start, but the key ID stayed
-  `gbo-consent-demo-1`, so the PDP could verify new consent tokens with the
-  old key it had cached and refuse them. Without `CONSENT_SIGNING_KEY_ID`
-  the key ID is now the key's RFC 7638 JWK thumbprint; an explicit value is
-  kept. The new `CONSENT_STORE` (`memory` or `postgres`) names the store;
-  unset, it is `postgres` when `DATABASE_URL` is set and `memory` otherwise,
-  as before. Compose sets `CONSENT_STORE=memory`.
-- **Contract auto-sign distinguishes an unavailable admission register**
-  (#491): a missing OpenFTV PIP document now refuses with
+  `gbo-consent-demo-1`, so the PDP could verify new consent tokens with the old
+  key it had cached and refuse them. Without `CONSENT_SIGNING_KEY_ID` the key ID
+  is now the key's RFC 7638 JWK thumbprint; an explicit value is kept. The new
+  `CONSENT_STORE` (`memory` or `postgres`) names the store; unset, it is
+  `postgres` when `DATABASE_URL` is set and `memory` otherwise, as before.
+  Compose sets `CONSENT_STORE=memory`.
+- **Contract auto-sign distinguishes an unavailable admission register** (#491):
+  a missing OpenFTV PIP document now refuses with
   `ADMISSION_REGISTER_UNAVAILABLE`, while an empty or incomplete register
-  continues to refuse with `PARTY_NOT_IN_REGISTRY`. The operator guidance
-  treats the former as a register or PIP pull failure.
+  continues to refuse with `PARTY_NOT_IN_REGISTRY`. The operator guidance treats
+  the former as a register or PIP pull failure.
 - **Retrieve answered 200 without the attributes the source holds no value
   for.** It left them out, and with none left the response had an empty
-  `attributes` array. It now answers 404 naming the attribute, with no
-  partial result (ETSI TS 119 478 REQ-ASIP-6.1.2.2-06 and -02-01). Verify is
-  unchanged: a missing value is `Unknown` (#533).
+  `attributes` array. It now answers 404 naming the attribute, with no partial
+  result (ETSI TS 119 478 REQ-ASIP-6.1.2.2-06 and -02-01). Verify is unchanged:
+  a missing value is `Unknown` (#533).
 - **The ASIP named the wrong metadata URL for an issuer with a path.** It
   appended `/.well-known/oauth-authorization-server` to the issuer; RFC 8414
   section 3.1 puts the suffix between the host and the path. The contract's
   `x-oauth-authorization-server` and the ASIP's own key fetch now use that
   location. Issuers without a path are unchanged.
-- **The toestemmingsportaal loads again.** Dependabot moved `react` to
-  19.3.0 but left `react-dom` at 19.2.8, and React refuses to render with the
-  two out of step; the portal showed a blank page.
+- **The toestemmingsportaal loads again.** Dependabot moved `react` to 19.3.0
+  but left `react-dom` at 19.2.8, and React refuses to render with the two out
+  of step; the portal showed a blank page.
 - Confined developer-portal scenario writes and policy-source reads to their
   configured roots, preventing path and symlink traversal.
 - **The developer portal showed no engine detail for a denial.** A console
@@ -1367,131 +1336,689 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Dependabot no longer watches the removed `services/pdp-service`.
 - The `dienstverlener-backend` image builds on main again. Since it started
   writing LDV records (#366) its Dockerfile copies the sibling
-  `services/ldv-client` and expects the repo root as build context; compose
-  and `ci.yml` were updated, but the image manifest
-  (`.github/scripts/image-manifest.sh`) still built from the service
-  directory, so every `build` run on main failed on
+  `services/ldv-client` and expects the repo root as build context; compose and
+  `ci.yml` were updated, but the image manifest
+  (`.github/scripts/image-manifest.sh`) still built from the service directory,
+  so every `build` run on main failed on
   `"/services/dienstverlener-backend": not found`. PR CI did not catch it:
   `ci.yml` keeps its own context list, and `images.yml` only runs on main.
 
 ## [0.6.11] - 2026-09-07
 
 ### Changed
-- **A source's metadata leg and data leg now choose their transport independently.** `data_access` returns to the source configuration, carrying only `transport` and `provider_peer_id`; the data service and grant hash stay derived from the source document and from current contracts. Omitting the block keeps the previous meaning, in which one transport served both legs.
-  - This unblocks the realistic onboarding order: a source whose GraphQL service is already published on FSC can be onboarded before it publishes `/.well-known/gbo`, instead of having to stand up a second FSC service first. The data call stays contract-bound throughout; only the description arrives another way.
-  - A new `file` metadata transport reads the source document from an operator-managed directory (`--metadata-dir`, `SOURCE_METADATA_PATH`; `source-metadata/` in Compose) for sources that publish no metadata endpoint at all. Paths are relative and confined to that directory, re-checked after symlink resolution, and the document digest takes the place of the ETag so the not-modified path behaves as it does over HTTP. Validation, OIN binding to the provisioned certificate set, and explicit promotion are unchanged — what is removed is the fetch, not the review.
-  - FSC metadata combined with unsecured data is rejected: that is a weakening of a position a source already reached, not a stage it is moving through. `file` metadata requires an explicit `data_access`, because a document on disk says nothing about how to reach the source. One source remains one FSC peer, so `provider_peer_id` is declared on whichever leg speaks FSC and never on both.
-  - The registry reports both legs. `data_transport_authenticated` joins `transport_authenticated` on candidates, statuses, release sources and `inspect-source-registry`; migration `002` backfills it from the existing value, which is exact for rows written when both legs shared one transport. The column sits outside the release digest document, so stored release IDs stay valid.
-  - Deployment migration: none required. Existing configurations, releases and databases keep working; a first reconciliation after the upgrade produces new candidate content and therefore a new release ID, as any metadata change does.
-- **`flow` and `subject_id_type` are grant properties again, and `additional-claims-service` is gone.** They now travel in `grant.data.properties` on the service-connection contract, which puts them in the grant hash — so both peers countersign the authorization regime the consumer is judged under, and the provider Manager emits them in the access token as the FSC-normative `prp` claim (fsc-core §Properties). The PDP request-mapper and the bron-sidecar read `prp` only; the OpenFSC `add` hook, its provider-side service, the checked-in `(outway_peer, service_peer, service_name)` mapping file and `ADDITIONAL_CLAIMS_API_ADDRESS` on `bd-manager`/`brp-manager` are removed.
-  - The workaround was a version constraint, not a design: the simulation environment ran OpenFSC v1.44, which predates properties support. Properties have been supported end-to-end since v2.0.0 and the environment now runs v2.4.0. What the `add` route cost meanwhile: only the source Manager signed the regime, and the mapping file had to be hand-maintained next to the contracts — which is exactly how the Peer-ID migration broke it twice ([#244](https://github.com/ICTU/GBO-demo/issues/244), [#277](https://github.com/ICTU/GBO-demo/issues/277)).
-  - Contracts are immutable, so this is new contracts rather than edited ones. The seed scripts now match on the desired properties as well as on the service, so re-running a seed detects a contract carrying the old (empty) properties, creates a replacement and repoints the grant-link at the new grant hash. The superseded contract stays Valid but unused until it expires; `make fsc-clean` removes it in a disposable environment.
-  - `GRANT_PROPERTIES` parameterizes the seed. Data services default to `{"flow": "eudi:attestation", "subject_id_type": "direct"}`, the HV connection to `{"flow": "dvtp:query", "subject_id_type": "pseudonym"}`, and metadata transport is seeded with `{"flow": "gbo:source-metadata"}` — no `subject_id_type`, because metadata is not subject-bound.
-  - Deployment migration: every peer on a contract needs OpenFSC >= v2.0.0 before the re-seed, and the re-seed has to be coordinated with the counterparty tenants. Until a peer's contract carries properties, its requests deny with `NO_APPLICABLE_RULE` ([#279](https://github.com/ICTU/GBO-demo/issues/279)).
-- The Hypotheek-BV mock closes the DvTP loop visually: the return screen is now the same dossier overview as the start screen, with "Inkomensgegevens" ticked off and expandable to reveal the retrieved aangiftes, instead of a separate results page. Partial consent keeps the item amber ("Deels compleet") and lists the withheld years inside the panel. Both screens share the header and checklist components so they cannot drift apart.
-- Source configuration now contains only the metadata transport locator. The filename is the stable `source_id`; the legal OIN and organisation name are read from the provisioned certificates under that same key. `certificate_set`, the fixed well-known path and the duplicated data transport were removed, and certificate provisioning now takes `--source-id` instead of a second certificate-set identifier. Demo deployments can opt into `reconcile-sources --auto-promote` to generate and promote a fully validated source set automatically; production remains explicitly promoted and every generated issuance revision still requires a runtime rollout.
-- FSC transport identities are now explicit 20-character alphanumeric Peer IDs, separate from numeric 20-digit source OINs used in source metadata and EUDI certificates. Source reconciliation resolves contracts through `provider_peer_id`; DvTP source holders and technical participants are deployment-configured rather than hardcoded in Rego. Runtime certificate loading requires leaf keys/certificates and public CA certificates only; CA private keys remain confined to explicit provisioning.
-  - Deployment migration: add `metadata_endpoint.provider_peer_id` to every FSC source configuration; remove the duplicated source identity, certificate selector, fixed path and data transport from that file; replace `--consumer-oin`/`ISSUER_OIN` with `--consumer-peer-id`/`FSC_CONSUMER_PEER_ID`; mount a DvTP onboarding JSON file through `ONBOARDING_CONFIG_PATH`; and deploy the register, OpenFTV PIP mapping and autosign policy together. The old SQLite `oin` primary key is migrated in place, while source permissions keep their stored identifiers and therefore require a clean database or operator review when an environment also changes its source-holder Peer IDs.
+
+- **A source's metadata leg and data leg now choose their transport
+  independently.** `data_access` returns to the source configuration, carrying
+  only `transport` and `provider_peer_id`; the data service and grant hash stay
+  derived from the source document and from current contracts. Omitting the
+  block keeps the previous meaning, in which one transport served both legs.
+  - This unblocks the realistic onboarding order: a source whose GraphQL service
+    is already published on FSC can be onboarded before it publishes
+    `/.well-known/gbo`, instead of having to stand up a second FSC service
+    first. The data call stays contract-bound throughout; only the description
+    arrives another way.
+  - A new `file` metadata transport reads the source document from an
+    operator-managed directory (`--metadata-dir`, `SOURCE_METADATA_PATH`;
+    `source-metadata/` in Compose) for sources that publish no metadata endpoint
+    at all. Paths are relative and confined to that directory, re-checked after
+    symlink resolution, and the document digest takes the place of the ETag so
+    the not-modified path behaves as it does over HTTP. Validation, OIN binding
+    to the provisioned certificate set, and explicit promotion are unchanged —
+    what is removed is the fetch, not the review.
+  - FSC metadata combined with unsecured data is rejected: that is a weakening
+    of a position a source already reached, not a stage it is moving through.
+    `file` metadata requires an explicit `data_access`, because a document on
+    disk says nothing about how to reach the source. One source remains one FSC
+    peer, so `provider_peer_id` is declared on whichever leg speaks FSC and
+    never on both.
+  - The registry reports both legs. `data_transport_authenticated` joins
+    `transport_authenticated` on candidates, statuses, release sources and
+    `inspect-source-registry`; migration `002` backfills it from the existing
+    value, which is exact for rows written when both legs shared one transport.
+    The column sits outside the release digest document, so stored release IDs
+    stay valid.
+  - Deployment migration: none required. Existing configurations, releases and
+    databases keep working; a first reconciliation after the upgrade produces
+    new candidate content and therefore a new release ID, as any metadata change
+    does.
+- **`flow` and `subject_id_type` are grant properties again, and
+  `additional-claims-service` is gone.** They now travel in
+  `grant.data.properties` on the service-connection contract, which puts them in
+  the grant hash — so both peers countersign the authorization regime the
+  consumer is judged under, and the provider Manager emits them in the access
+  token as the FSC-normative `prp` claim (fsc-core §Properties). The PDP
+  request-mapper and the bron-sidecar read `prp` only; the OpenFSC `add` hook,
+  its provider-side service, the checked-in
+  `(outway_peer, service_peer, service_name)` mapping file and
+  `ADDITIONAL_CLAIMS_API_ADDRESS` on `bd-manager`/`brp-manager` are removed.
+  - The workaround was a version constraint, not a design: the simulation
+    environment ran OpenFSC v1.44, which predates properties support. Properties
+    have been supported end-to-end since v2.0.0 and the environment now runs
+    v2.4.0. What the `add` route cost meanwhile: only the source Manager signed
+    the regime, and the mapping file had to be hand-maintained next to the
+    contracts — which is exactly how the Peer-ID migration broke it twice
+    ([#244](https://github.com/ICTU/GBO-demo/issues/244),
+    [#277](https://github.com/ICTU/GBO-demo/issues/277)).
+  - Contracts are immutable, so this is new contracts rather than edited ones.
+    The seed scripts now match on the desired properties as well as on the
+    service, so re-running a seed detects a contract carrying the old (empty)
+    properties, creates a replacement and repoints the grant-link at the new
+    grant hash. The superseded contract stays Valid but unused until it expires;
+    `make fsc-clean` removes it in a disposable environment.
+  - `GRANT_PROPERTIES` parameterizes the seed. Data services default to
+    `{"flow": "eudi:attestation", "subject_id_type": "direct"}`, the HV
+    connection to `{"flow": "dvtp:query", "subject_id_type": "pseudonym"}`, and
+    metadata transport is seeded with `{"flow": "gbo:source-metadata"}` — no
+    `subject_id_type`, because metadata is not subject-bound.
+  - Deployment migration: every peer on a contract needs OpenFSC >= v2.0.0
+    before the re-seed, and the re-seed has to be coordinated with the
+    counterparty tenants. Until a peer's contract carries properties, its
+    requests deny with `NO_APPLICABLE_RULE`
+    ([#279](https://github.com/ICTU/GBO-demo/issues/279)).
+- The Hypotheek-BV mock closes the DvTP loop visually: the return screen is now
+  the same dossier overview as the start screen, with "Inkomensgegevens" ticked
+  off and expandable to reveal the retrieved aangiftes, instead of a separate
+  results page. Partial consent keeps the item amber ("Deels compleet") and
+  lists the withheld years inside the panel. Both screens share the header and
+  checklist components so they cannot drift apart.
+- Source configuration now contains only the metadata transport locator. The
+  filename is the stable `source_id`; the legal OIN and organisation name are
+  read from the provisioned certificates under that same key. `certificate_set`,
+  the fixed well-known path and the duplicated data transport were removed, and
+  certificate provisioning now takes `--source-id` instead of a second
+  certificate-set identifier. Demo deployments can opt into
+  `reconcile-sources --auto-promote` to generate and promote a fully validated
+  source set automatically; production remains explicitly promoted and every
+  generated issuance revision still requires a runtime rollout.
+- FSC transport identities are now explicit 20-character alphanumeric Peer IDs,
+  separate from numeric 20-digit source OINs used in source metadata and EUDI
+  certificates. Source reconciliation resolves contracts through
+  `provider_peer_id`; DvTP source holders and technical participants are
+  deployment-configured rather than hardcoded in Rego. Runtime certificate
+  loading requires leaf keys/certificates and public CA certificates only; CA
+  private keys remain confined to explicit provisioning.
+  - Deployment migration: add `metadata_endpoint.provider_peer_id` to every FSC
+    source configuration; remove the duplicated source identity, certificate
+    selector, fixed path and data transport from that file; replace
+    `--consumer-oin`/`ISSUER_OIN` with
+    `--consumer-peer-id`/`FSC_CONSUMER_PEER_ID`; mount a DvTP onboarding JSON
+    file through `ONBOARDING_CONFIG_PATH`; and deploy the register, OpenFTV PIP
+    mapping and autosign policy together. The old SQLite `oin` primary key is
+    migrated in place, while source permissions keep their stored identifiers
+    and therefore require a clean database or operator review when an
+    environment also changes its source-holder Peer IDs.
 
 ### Fixed
-- Hardened the mock DvTP onboarding register without adding a user-account system: every mutation now requires a per-process CSRF token plus a same-origin browser request, and only the PDP shares its dedicated Docker network. The register rejects and filters deployment-managed technical Peer IDs so its UI cannot contradict the policy's effective technical-party state. Toggle storage failures are logged and return `500` instead of masquerading as a missing participant. Finally, `pdp-up` now probes the real autosign decision until the seeded Hypotheek-BV admission has arrived through the native PIP pull; process health alone could race the first pull and intermittently leave seeded contracts pending.
-- Predefined DvTP issuance scenarios no longer hard-code the local Hypotheek-BV identity. `dev-portal-backend` injects `DVTP_CONSUMER_PEER_ID` into `dienstverlener_oin`, defaulting to `99999999900000000300` only for local development, while custom payloads remain untouched. Deployments can now bind consent to their actual FSC consumer Peer ID and avoid `CONSENT_ACTOR_MISMATCH`. The unused `dienstverlener-backend` `ORG_OIN` setting was removed; FSC supplies the caller identity.
-- The `make demo-*` banners print the ports the stack actually published. They hardcoded `9003`/`9002`/`9001`/`9686`/`9181` and ignored `GBO_PORT_*`, so a checkout that shifts its ports in `.env` to run beside another one was handed URLs that do not resolve. Same for `ONBOARDING_OUTWAY_URL` and `ONBOARDING_TYPE_METADATA_URL`, which are dialled rather than printed.
-- The GraphQL mirror schemas moved out of `policies/` (to `schemas/pdp-mirror/`). The OpenFTV PAP loads **every** file under `PDP_POLICIES_STORE` as a Rego module, and OPA keeps its previous compiler when one module fails to parse — so the three `.graphql` files silently dropped every policy that came after them in walk order. Nothing loaded after `policies/dvtp/schemas/` until now, which is why it went unnoticed; the failure mode is a bare HTTP 500 and `"<path> decision was undefined"` in the PDP log, with the earlier policies still answering normally. CI now rejects any non-Rego file under `policies/`.
-- The PDP image's patch of the upstream OpenFTV tree now fails the build when it does not apply. `sed -i` exits 0 when its pattern matches nothing, so a rename upstream would have produced a PDP in which the request-mapper is never registered — every policy evaluating against an empty context, with nothing reporting it. Release images are not gated on a PR, so a silently broken patch could have been published.
-- Three stale references to the abandoned PIP pull-config: the README's access-basis table, the compose comment on `openftv-pdp`, and the header of `policies/authz.rego`, which still described the retired `pdp-service` as the source of the context enrichment. Consent is fetched per request by the mapper.
-- Removed `.github/scripts/ci-change-plan.sh`, dead since `ci.yml` went back to a hardcoded matrix.
-- Three dead ends removed from the PDP's request-mapper, left behind when the bronprofiel stopped being an axis of the flow name. `isEUDIFlow` still accepted `eudi:attestation:*` — a form nothing emits and `_flow_applicable` denies, so a suffixed request was pseudonymised through BSNk on its way to a guaranteed `NO_APPLICABLE_RULE`. The mapper still read the `X-GBO-Flow` header, which the eudi-adapter stopped sending and which let a caller name the regime it wanted to be judged under. And a request with neither claim nor header defaulted to `dvtp:query`, silently selecting the consent-based regime; an absent flow is now empty, matches no rule, and denies. `flowFromHeaders` gains the test coverage it never had.
-- The `dev-portal-backend` image now includes the release-matched Rego policy sources and generated `rules.json` used by its policy-inspection endpoints. Deployments no longer need to copy those files into a separate ConfigMap, and policy changes now invalidate the image's content tag and CI build plan.
-- Release workflow builds the `openftv-pdp` image with the repo root as build context, the way compose already did. Its Dockerfile bakes in `./policies` and reads `services/openftv-pdp/{mapper,field-map.json}`, all of which sit outside the service directory, so the service-scoped context failed on `"/policies": not found` and the image was not published for `v0.5.2`.
-- The PDP's generated AuthZen TLS keypair was not ignored by git: `.gitignore` still named `services/pdp-service/certs/`, the path the service had before it became `openftv-pdp`, so anyone who had run the demo carried an untracked private key that was one `git add -A` away from being committed.
+
+- Hardened the mock DvTP onboarding register without adding a user-account
+  system: every mutation now requires a per-process CSRF token plus a
+  same-origin browser request, and only the PDP shares its dedicated Docker
+  network. The register rejects and filters deployment-managed technical Peer
+  IDs so its UI cannot contradict the policy's effective technical-party state.
+  Toggle storage failures are logged and return `500` instead of masquerading as
+  a missing participant. Finally, `pdp-up` now probes the real autosign decision
+  until the seeded Hypotheek-BV admission has arrived through the native PIP
+  pull; process health alone could race the first pull and intermittently leave
+  seeded contracts pending.
+- Predefined DvTP issuance scenarios no longer hard-code the local Hypotheek-BV
+  identity. `dev-portal-backend` injects `DVTP_CONSUMER_PEER_ID` into
+  `dienstverlener_oin`, defaulting to `99999999900000000300` only for local
+  development, while custom payloads remain untouched. Deployments can now bind
+  consent to their actual FSC consumer Peer ID and avoid
+  `CONSENT_ACTOR_MISMATCH`. The unused `dienstverlener-backend` `ORG_OIN`
+  setting was removed; FSC supplies the caller identity.
+- The `make demo-*` banners print the ports the stack actually published. They
+  hardcoded `9003`/`9002`/`9001`/`9686`/`9181` and ignored `GBO_PORT_*`, so a
+  checkout that shifts its ports in `.env` to run beside another one was handed
+  URLs that do not resolve. Same for `ONBOARDING_OUTWAY_URL` and
+  `ONBOARDING_TYPE_METADATA_URL`, which are dialled rather than printed.
+- The GraphQL mirror schemas moved out of `policies/` (to
+  `schemas/pdp-mirror/`). The OpenFTV PAP loads **every** file under
+  `PDP_POLICIES_STORE` as a Rego module, and OPA keeps its previous compiler
+  when one module fails to parse — so the three `.graphql` files silently
+  dropped every policy that came after them in walk order. Nothing loaded after
+  `policies/dvtp/schemas/` until now, which is why it went unnoticed; the
+  failure mode is a bare HTTP 500 and `"<path> decision was undefined"` in the
+  PDP log, with the earlier policies still answering normally. CI now rejects
+  any non-Rego file under `policies/`.
+- The PDP image's patch of the upstream OpenFTV tree now fails the build when it
+  does not apply. `sed -i` exits 0 when its pattern matches nothing, so a rename
+  upstream would have produced a PDP in which the request-mapper is never
+  registered — every policy evaluating against an empty context, with nothing
+  reporting it. Release images are not gated on a PR, so a silently broken patch
+  could have been published.
+- Three stale references to the abandoned PIP pull-config: the README's
+  access-basis table, the compose comment on `openftv-pdp`, and the header of
+  `policies/authz.rego`, which still described the retired `pdp-service` as the
+  source of the context enrichment. Consent is fetched per request by the
+  mapper.
+- Removed `.github/scripts/ci-change-plan.sh`, dead since `ci.yml` went back to
+  a hardcoded matrix.
+- Three dead ends removed from the PDP's request-mapper, left behind when the
+  bronprofiel stopped being an axis of the flow name. `isEUDIFlow` still
+  accepted `eudi:attestation:*` — a form nothing emits and `_flow_applicable`
+  denies, so a suffixed request was pseudonymised through BSNk on its way to a
+  guaranteed `NO_APPLICABLE_RULE`. The mapper still read the `X-GBO-Flow`
+  header, which the eudi-adapter stopped sending and which let a caller name the
+  regime it wanted to be judged under. And a request with neither claim nor
+  header defaulted to `dvtp:query`, silently selecting the consent-based regime;
+  an absent flow is now empty, matches no rule, and denies. `flowFromHeaders`
+  gains the test coverage it never had.
+- The `dev-portal-backend` image now includes the release-matched Rego policy
+  sources and generated `rules.json` used by its policy-inspection endpoints.
+  Deployments no longer need to copy those files into a separate ConfigMap, and
+  policy changes now invalidate the image's content tag and CI build plan.
+- Release workflow builds the `openftv-pdp` image with the repo root as build
+  context, the way compose already did. Its Dockerfile bakes in `./policies` and
+  reads `services/openftv-pdp/{mapper,field-map.json}`, all of which sit outside
+  the service directory, so the service-scoped context failed on
+  `"/policies": not found` and the image was not published for `v0.5.2`.
+- The PDP's generated AuthZen TLS keypair was not ignored by git: `.gitignore`
+  still named `services/pdp-service/certs/`, the path the service had before it
+  became `openftv-pdp`, so anyone who had run the demo carried an untracked
+  private key that was one `git add -A` away from being committed.
 
 ### Added
-- **Logboek Dataverwerkingen (LDV v1.0.0), write side, Belastingdienst chain.** A new `ldv-logboek` service — one image, one instance per Verantwoordelijke, like the sidecars — plus `logboek-bd` and instrumentation in `bron-sidecar` and `graphql-server`. The chain now writes the third of its three logs: the ADL records PDP decisions, FSC-Logging records transport transactions, and LDV records the data processing itself. All three carry one trace id, because LDV's `traceID` is the `Fsc-Transaction-Id` — a UUID is exactly 32 hex characters once the hyphens come off ([#302](https://github.com/ICTU/GBO-demo/issues/302)).
-  - **Not span relabelling.** LDV reuses the OTel log-record shape, which invites exactly that conclusion. The guarantees are different (REQ-32): every Dataverwerking must be logged, one record per Betrokkene, every write confirmed by the logbook, no sampling ever, durable storage. So it is a separate service with a separate store, SQLite at `synchronous = FULL`, and a `(trace_id, span_id)` primary key that makes a producer's retry idempotent instead of duplicating a processing. Loki, Jaeger and Grafana are unchanged.
-  - **Fail-closed.** A component joins the chain by having `LDV_LOGBOOK_URL` set, and from then on a processing that cannot be logged does not deliver: the sidecar withholds the source response, the bron buffers its GraphQL answer until the records are confirmed and returns `500` otherwise. There is no third mode where records are dropped quietly, because that is the whole difference from an observability pipeline. With the variable unset a component is not in an LDV chain at all — which is how `unsecured-graphql-server`, the same image as `graphql-server`, stays out of it.
-  - **Never the BSN** (REQ-60/72). `dpl.core.data_subject_id` carries the PI in the DvTP chain — including in the record *about* de-pseudonymising it — and `dpl.core.data_subject_id_type` is always set. Where a component holds only a BSN (the EUDI flow) it derives a keyed, logbook-local `logboek-pseudoniem`, a demo stand-in that makes the missing pseudonym visible rather than papering over it. The logbook does not take the producers' word for it: every write is scanned for a nine-digit run that passes the elfproef, in attribute values including numbers and nested structures, the record name and the resource, and refused if one is found.
-  - **A verwerkingsactiviteiten register stand-in**, because every record must name a resolvable, versioned activity and this demo has no RvVA. Each logbook serves a small versioned document generated from the dienstencatalogus scope definitions (`bd:ib:2025`, `bd:ib:2024`) plus the infrastructural processings, validates every write against it, and labels every served entry as *not* an RvVA. A component names the activity it performs and the logbook refuses a reference its register does not resolve, so a verstrekking nobody wrote down does not happen — the register requirement biting rather than being described. Whether the real register extends the catalog or becomes a separate facility stays open.
-  - One DvTP query now yields `bd-bronquery-doorgifte@v1` from the sidecar, `bd-pi-bsn-resolutie@v1` beneath it, and one `bd-ib-<jaar>@v1` per requested belastingjaar from the bron — a multi-year query being several verwerkingsactiviteiten and therefore several sibling records for the same Betrokkene. A request that resolves no Betrokkene processes no personal data and produces none.
-  - Transport is plain HTTPS+JSON. The standard leaves the protocol free (OTLP is only RECOMMENDED) and JSON keeps the demo inspectable with `curl`; noted as a simplification rather than a reading of the standard. Access control is network-internal plus a shared bearer token, and the real access model remains an open governance question (Q-08).
-  - The client lives in `services/ldv-client`, a sibling Go module pulled in with a path `replace` rather than published and versioned — a change to it has to be usable by the services in the same commit, without a tag in between. Its consequence is that the services depending on it build from the repository root, which is the arrangement `eudi-adapter` and `dev-portal-backend` already use; a new `.dockerignore` keeps that context from including the nl-wallet submodule. The module owns what is identical everywhere (configuration, the register fetch, the confirmed write, trace/span ids, the attribute map, FSC claim decoding, subject derivation) and a `ldvtest` package with the fake logbook the services' tests drive, so that behaviour is tested once rather than per service. What stays per service is only what that service knows about its own processings.
-- **The read side, and the chain view that makes the three-standard claim checkable.** LDV's extensie lezen on every logbook, `dpl.read.nextLogbookId` on the record that crosses an organisation boundary, and a developer-portal panel that shows, per trace, the LDV records of every Verantwoordelijke next to the FSC transaction records and the PDP decision — all carrying one id ([#302](https://github.com/ICTU/GBO-demo/issues/302)).
-  - `GET /logboek/records` queries on `traceID`, `processingActivityID` or `dataSubjectId`, one axis at a time, capped, with the response saying whether the cap truncated it. Deliberately not a query language: a logbook you can page through freely has become a second copy of the data it describes.
-  - **Reading takes its own token.** Every instrumented component must write and almost nothing should read, so a component that can write cannot thereby read — a logbook holds a record of every processing about a person, and unrestricted read access recreates the very concentration the pseudonymisation avoids. Who *should* read it (the citizen, a DPO, a toezichthouder, incident response) stays the open governance question.
-  - The chain view is a query per logbook joined on the trace id, not one query, because LDV keeps each Verantwoordelijke's records in its own store and lets only trace metadata cross a boundary. `dpl.read.nextLogbookId` is what lets a reader follow the request across that boundary: the `eudi-adapter` sets it on the attestation-assembly record, naming the bronhouder's logbook. A logbook that is down shows as down rather than as empty, the way the FSC txlog panel already handles an unreachable peer.
-  - The panel renders the records as the tree their `parent_span_id` describes, so a sidecar's forward visibly holds the source query beneath it and a death certificate visibly holds one child record per further Betrokkene. Unlike the Jaeger and Loki lookups beside it, this one needs no backoff retry: the records are confirmed on write and never sampled, so if the request finished they are there.
-  - **A multi-year query mislabelled all but one of its records.** The scope header was preferred over the belastingjaar when naming the verwerkingsactiviteit, so a 2024+2025 query produced a record for 2024 that claimed `bd-ib-2025@v1` while its own `gbo.belastingjaar` said 2024. Both routes land on the same entry for a single year, which is why it went unnoticed until a two-year request ran against the real stack. The year now decides; the scope is the fallback for a request that names none.
-  - **The PDP now passes the `Fsc-Transaction-Id` on when it asks the consent register for a status.** Confirming a status is itself a Dataverwerking that the register logs, and without the identifier that record landed under a trace of its own — outside the very request it was part of, and so invisible in a chain view that joins on it. Found by running the chain view against the real stack, which is what it is for.
-  - `consent-register`'s route table was split into named handlers; the LDV instrumentation had pushed `newMux` past the cyclomatic ceiling, which was a fair signal rather than a lint technicality.
-- **The remaining Verantwoordelijken get their logbooks: `logboek-brp` (RvIG) and `logboek-gbo`.** Every Dataverwerking in the in-scope components now produces records, in the logbook of the organisation that performed it — three separate stores, tied together by one trace id rather than by one database, because LDV has each Verantwoordelijke log its own processing and lets only trace metadata cross a boundary.
-  - **RvIG**: `brp-sidecar` and `brp-graphql-server`. The death-certificate flow is the multi-subject case: one request is about the surviving partner who asked *and* the living relatives the certificate names, so it produces a record per Betrokkene, the relatives' hanging under the requester's. The deceased is deliberately not among them — the AVG protects living persons, so the person the certificate is about is not a Betrokkene of this processing even though their data is what gets disclosed; the requester's record carries `gbo.akte.overledene_verwerkt` so a reader sees that this was decided rather than forgotten. `akteVanOverlijden` now returns the partner it selected, so the record set is derived from the same selection as the certificate instead of a second walk that could drift from it.
-  - **GBO**: `consent-register` (grant, revoke, status-confirm, citizen inzage), `consent-portal-backend` (the BSN→PI pseudonymisation at consent intake) and `eudi-adapter` (reading the BSN out of a disclosed PID, and assembling the attestation). The status check is logged like any other processing rather than treated as a read-only lookup: it is the step that makes a revocation take effect.
-  - Two new subject-id types, and the distinction is the point. `portal-subject` is the portal-scoped reference the consent chain works with — never the PI, which exists there only inside the signed token. `brp-persoon-id` is RvIG's own record identifier and deliberately not a pseudonym: it names someone who appears in a certificate about another person and for whom the source has no pseudonym at all, which is acceptable only because that record never leaves RvIG's own logbook. The pseudonym key is per Verantwoordelijke, since one shared key would make the same citizen recognisable across organisations' logbooks.
-  - Fail-closed everywhere it can be. The adapter files the PID-extraction record before it calls the source, so a request that cannot be logged never reaches the bronhouder; the portal files the pseudonymisation record before the consent is created, so a refused record leaves no consent behind. Revocation is the one place where the ordering cannot be won — the revocation is already stored — so the confirmation is withheld instead, and the comment says so.
-  - `consent-portal-backend` gets a `Logbook` port in its core rather than the shared client: it is laid out as ports and adapters, it never crosses an FSC boundary and never puts a BSN in a record, so a purpose-built adapter avoids carrying machinery it has no use for. `consent-register` uses the shared client but never its subject derivation, for the same reason: it only ever holds a portal-scoped reference.
-  - `brp-graphql-server`, `consent-register` and `eudi-adapter` now build from the repository root, joining `bron-sidecar` and `graphql-server`, because they depend on the `services/ldv-client` module.
-- **Contract acceptance by policy on the bronhouder's FSC Manager.** `bd-manager` no longer auto-signs by grant type; every contract a peer submits is put to the OpenFTV PDP as an AuthZEN evaluation (`--authzen-auto-sign-pdp-address`) and counter-signed only on `decision=true`. For the local demo, onboarding a new private party for DvTP therefore becomes a registry edit rather than a manual signature or a config change on the Manager.
-  - The policy is `policies/fsc/autosign.rego`, kept fully separate from the request-authorization tree under `policies/dvtp/`: different package, different input, no shared rules. A contract decides *whether these parties may connect at all*; `data.authz` decides *whether this field may be read now*.
-  - Its package name is fixed by the Manager, not by us. The Manager sends `context.doelbinding = "auto_sign_contract"`, and OpenFTV derives the OPA entrypoint from that (`determinePath`), so the decision is read from `data.doelbinding.auto_sign_contract`. Renaming the package disables the policy silently: the path resolves to nothing and every contract stays pending.
-  - Private DvTP admission moved out of Rego into the demo `dvtp-onboarding-register`: a small SQLite-backed UI keyed by the 20-character alphanumeric FSC Peer ID, with an active flag and explicit source-holder checkboxes whose values are source-holder Peer IDs. OpenFTV pulls its internal JSON endpoint every five seconds through native `pipPullConfig` and exposes the entities to Rego; the policy compares the local Manager's Peer ID directly with those admitted Peer IDs and keeps no source-name translation table. The endpoint is reachable on the internal Docker network, while the UI is bound to host loopback rather than exposed on every interface. Technical peers such as the EUDI issuer are supplied by deployment configuration and appear in the same policy feed without becoming mutable UI records ([#230](https://github.com/ICTU/GBO-demo/issues/230)).
-  - The serviceConnection-only gate moved into the policy. `--auto-sign-grants` and a PDP address are mutually exclusive — the Manager exits with *"cannot combine the auto sign grants option with an auto-sign policy decision point"* — so without that check the registry rule alone would also accept delegated grants.
-  - The payload the Manager sends is thin: contract hash, grant-type codes and Peer IDs. No service name and no outway thumbprint, so the local source Manager's Peer ID identifies which source-holder admission must be checked. Deny reasons are `PARTY_NOT_IN_REGISTRY`, `PARTY_NOT_ACTIVE`, `SOURCE_NOT_ALLOWED`, `GRANT_TYPE_NOT_ALLOWED`, `NO_COUNTERPARTY` and `NOT_AN_AUTOSIGN_REQUEST`.
-  - Both sources are on it: `bd-manager` and `brp-manager`. Admission is deliberately per source holder: ticking Belastingdienst stores its Peer ID and does not admit the same private party to BRP. Service-specific admission under one source-holder Peer ID requires OpenFSC to include the contract's service details in the AuthZen autosign input and is tracked in [#240](https://github.com/ICTU/GBO-demo/issues/240). Only `directory-manager` keeps auto-signing by grant type, because the directory is a registry rather than a policy party — it accepts service *publications* from anyone in the group by design.
-  - A refusal leaves the contract **proposed**, not rejected. `ReceiveContractHandler` places a signature when the PDP says yes and does nothing when it says no; rejection is a separate, explicit action on the Manager's internal API. That is the right default — a `rejected` signature is distributed to the peers and terminal, so an automated "no" that turns out to be premature could not be undone. Once the party is registered, the consumer resubmits (new `iv` → new content hash → a new evaluation).
-  - `make fsc-all-up` now starts `openftv-pdp` before the FSC seeds run (`make pdp-up`). The PDP lives in the main compose project, which used to start after `fsc-infra`, so every seeded connection contract would have hung pending until the seed's 30-second poll gave up without an error.
+
+- **Logboek Dataverwerkingen (LDV v1.0.0), write side, Belastingdienst chain.**
+  A new `ldv-logboek` service — one image, one instance per Verantwoordelijke,
+  like the sidecars — plus `logboek-bd` and instrumentation in `bron-sidecar`
+  and `graphql-server`. The chain now writes the third of its three logs: the
+  ADL records PDP decisions, FSC-Logging records transport transactions, and LDV
+  records the data processing itself. All three carry one trace id, because
+  LDV's `traceID` is the `Fsc-Transaction-Id` — a UUID is exactly 32 hex
+  characters once the hyphens come off
+  ([#302](https://github.com/ICTU/GBO-demo/issues/302)).
+  - **Not span relabelling.** LDV reuses the OTel log-record shape, which
+    invites exactly that conclusion. The guarantees are different (REQ-32):
+    every Dataverwerking must be logged, one record per Betrokkene, every write
+    confirmed by the logbook, no sampling ever, durable storage. So it is a
+    separate service with a separate store, SQLite at `synchronous = FULL`, and
+    a `(trace_id, span_id)` primary key that makes a producer's retry idempotent
+    instead of duplicating a processing. Loki, Jaeger and Grafana are unchanged.
+  - **Fail-closed.** A component joins the chain by having `LDV_LOGBOOK_URL`
+    set, and from then on a processing that cannot be logged does not deliver:
+    the sidecar withholds the source response, the bron buffers its GraphQL
+    answer until the records are confirmed and returns `500` otherwise. There is
+    no third mode where records are dropped quietly, because that is the whole
+    difference from an observability pipeline. With the variable unset a
+    component is not in an LDV chain at all — which is how
+    `unsecured-graphql-server`, the same image as `graphql-server`, stays out of
+    it.
+  - **Never the BSN** (REQ-60/72). `dpl.core.data_subject_id` carries the PI in
+    the DvTP chain — including in the record _about_ de-pseudonymising it — and
+    `dpl.core.data_subject_id_type` is always set. Where a component holds only
+    a BSN (the EUDI flow) it derives a keyed, logbook-local
+    `logboek-pseudoniem`, a demo stand-in that makes the missing pseudonym
+    visible rather than papering over it. The logbook does not take the
+    producers' word for it: every write is scanned for a nine-digit run that
+    passes the elfproef, in attribute values including numbers and nested
+    structures, the record name and the resource, and refused if one is found.
+  - **A verwerkingsactiviteiten register stand-in**, because every record must
+    name a resolvable, versioned activity and this demo has no RvVA. Each
+    logbook serves a small versioned document generated from the
+    dienstencatalogus scope definitions (`bd:ib:2025`, `bd:ib:2024`) plus the
+    infrastructural processings, validates every write against it, and labels
+    every served entry as _not_ an RvVA. A component names the activity it
+    performs and the logbook refuses a reference its register does not resolve,
+    so a verstrekking nobody wrote down does not happen — the register
+    requirement biting rather than being described. Whether the real register
+    extends the catalog or becomes a separate facility stays open.
+  - One DvTP query now yields `bd-bronquery-doorgifte@v1` from the sidecar,
+    `bd-pi-bsn-resolutie@v1` beneath it, and one `bd-ib-<jaar>@v1` per requested
+    belastingjaar from the bron — a multi-year query being several
+    verwerkingsactiviteiten and therefore several sibling records for the same
+    Betrokkene. A request that resolves no Betrokkene processes no personal data
+    and produces none.
+  - Transport is plain HTTPS+JSON. The standard leaves the protocol free (OTLP
+    is only RECOMMENDED) and JSON keeps the demo inspectable with `curl`; noted
+    as a simplification rather than a reading of the standard. Access control is
+    network-internal plus a shared bearer token, and the real access model
+    remains an open governance question (Q-08).
+  - The client lives in `services/ldv-client`, a sibling Go module pulled in
+    with a path `replace` rather than published and versioned — a change to it
+    has to be usable by the services in the same commit, without a tag in
+    between. Its consequence is that the services depending on it build from the
+    repository root, which is the arrangement `eudi-adapter` and
+    `dev-portal-backend` already use; a new `.dockerignore` keeps that context
+    from including the nl-wallet submodule. The module owns what is identical
+    everywhere (configuration, the register fetch, the confirmed write,
+    trace/span ids, the attribute map, FSC claim decoding, subject derivation)
+    and a `ldvtest` package with the fake logbook the services' tests drive, so
+    that behaviour is tested once rather than per service. What stays per
+    service is only what that service knows about its own processings.
+- **The read side, and the chain view that makes the three-standard claim
+  checkable.** LDV's extensie lezen on every logbook, `dpl.read.nextLogbookId`
+  on the record that crosses an organisation boundary, and a developer-portal
+  panel that shows, per trace, the LDV records of every Verantwoordelijke next
+  to the FSC transaction records and the PDP decision — all carrying one id
+  ([#302](https://github.com/ICTU/GBO-demo/issues/302)).
+  - `GET /logboek/records` queries on `traceID`, `processingActivityID` or
+    `dataSubjectId`, one axis at a time, capped, with the response saying
+    whether the cap truncated it. Deliberately not a query language: a logbook
+    you can page through freely has become a second copy of the data it
+    describes.
+  - **Reading takes its own token.** Every instrumented component must write and
+    almost nothing should read, so a component that can write cannot thereby
+    read — a logbook holds a record of every processing about a person, and
+    unrestricted read access recreates the very concentration the
+    pseudonymisation avoids. Who _should_ read it (the citizen, a DPO, a
+    toezichthouder, incident response) stays the open governance question.
+  - The chain view is a query per logbook joined on the trace id, not one query,
+    because LDV keeps each Verantwoordelijke's records in its own store and lets
+    only trace metadata cross a boundary. `dpl.read.nextLogbookId` is what lets
+    a reader follow the request across that boundary: the `eudi-adapter` sets it
+    on the attestation-assembly record, naming the bronhouder's logbook. A
+    logbook that is down shows as down rather than as empty, the way the FSC
+    txlog panel already handles an unreachable peer.
+  - The panel renders the records as the tree their `parent_span_id` describes,
+    so a sidecar's forward visibly holds the source query beneath it and a death
+    certificate visibly holds one child record per further Betrokkene. Unlike
+    the Jaeger and Loki lookups beside it, this one needs no backoff retry: the
+    records are confirmed on write and never sampled, so if the request finished
+    they are there.
+  - **A multi-year query mislabelled all but one of its records.** The scope
+    header was preferred over the belastingjaar when naming the
+    verwerkingsactiviteit, so a 2024+2025 query produced a record for 2024 that
+    claimed `bd-ib-2025@v1` while its own `gbo.belastingjaar` said 2024. Both
+    routes land on the same entry for a single year, which is why it went
+    unnoticed until a two-year request ran against the real stack. The year now
+    decides; the scope is the fallback for a request that names none.
+  - **The PDP now passes the `Fsc-Transaction-Id` on when it asks the consent
+    register for a status.** Confirming a status is itself a Dataverwerking that
+    the register logs, and without the identifier that record landed under a
+    trace of its own — outside the very request it was part of, and so invisible
+    in a chain view that joins on it. Found by running the chain view against
+    the real stack, which is what it is for.
+  - `consent-register`'s route table was split into named handlers; the LDV
+    instrumentation had pushed `newMux` past the cyclomatic ceiling, which was a
+    fair signal rather than a lint technicality.
+- **The remaining Verantwoordelijken get their logbooks: `logboek-brp` (RvIG)
+  and `logboek-gbo`.** Every Dataverwerking in the in-scope components now
+  produces records, in the logbook of the organisation that performed it — three
+  separate stores, tied together by one trace id rather than by one database,
+  because LDV has each Verantwoordelijke log its own processing and lets only
+  trace metadata cross a boundary.
+  - **RvIG**: `brp-sidecar` and `brp-graphql-server`. The death-certificate flow
+    is the multi-subject case: one request is about the surviving partner who
+    asked _and_ the living relatives the certificate names, so it produces a
+    record per Betrokkene, the relatives' hanging under the requester's. The
+    deceased is deliberately not among them — the AVG protects living persons,
+    so the person the certificate is about is not a Betrokkene of this
+    processing even though their data is what gets disclosed; the requester's
+    record carries `gbo.akte.overledene_verwerkt` so a reader sees that this was
+    decided rather than forgotten. `akteVanOverlijden` now returns the partner
+    it selected, so the record set is derived from the same selection as the
+    certificate instead of a second walk that could drift from it.
+  - **GBO**: `consent-register` (grant, revoke, status-confirm, citizen inzage),
+    `consent-portal-backend` (the BSN→PI pseudonymisation at consent intake) and
+    `eudi-adapter` (reading the BSN out of a disclosed PID, and assembling the
+    attestation). The status check is logged like any other processing rather
+    than treated as a read-only lookup: it is the step that makes a revocation
+    take effect.
+  - Two new subject-id types, and the distinction is the point. `portal-subject`
+    is the portal-scoped reference the consent chain works with — never the PI,
+    which exists there only inside the signed token. `brp-persoon-id` is RvIG's
+    own record identifier and deliberately not a pseudonym: it names someone who
+    appears in a certificate about another person and for whom the source has no
+    pseudonym at all, which is acceptable only because that record never leaves
+    RvIG's own logbook. The pseudonym key is per Verantwoordelijke, since one
+    shared key would make the same citizen recognisable across organisations'
+    logbooks.
+  - Fail-closed everywhere it can be. The adapter files the PID-extraction
+    record before it calls the source, so a request that cannot be logged never
+    reaches the bronhouder; the portal files the pseudonymisation record before
+    the consent is created, so a refused record leaves no consent behind.
+    Revocation is the one place where the ordering cannot be won — the
+    revocation is already stored — so the confirmation is withheld instead, and
+    the comment says so.
+  - `consent-portal-backend` gets a `Logbook` port in its core rather than the
+    shared client: it is laid out as ports and adapters, it never crosses an FSC
+    boundary and never puts a BSN in a record, so a purpose-built adapter avoids
+    carrying machinery it has no use for. `consent-register` uses the shared
+    client but never its subject derivation, for the same reason: it only ever
+    holds a portal-scoped reference.
+  - `brp-graphql-server`, `consent-register` and `eudi-adapter` now build from
+    the repository root, joining `bron-sidecar` and `graphql-server`, because
+    they depend on the `services/ldv-client` module.
+- **Contract acceptance by policy on the bronhouder's FSC Manager.**
+  `bd-manager` no longer auto-signs by grant type; every contract a peer submits
+  is put to the OpenFTV PDP as an AuthZEN evaluation
+  (`--authzen-auto-sign-pdp-address`) and counter-signed only on
+  `decision=true`. For the local demo, onboarding a new private party for DvTP
+  therefore becomes a registry edit rather than a manual signature or a config
+  change on the Manager.
+  - The policy is `policies/fsc/autosign.rego`, kept fully separate from the
+    request-authorization tree under `policies/dvtp/`: different package,
+    different input, no shared rules. A contract decides _whether these parties
+    may connect at all_; `data.authz` decides _whether this field may be read
+    now_.
+  - Its package name is fixed by the Manager, not by us. The Manager sends
+    `context.doelbinding = "auto_sign_contract"`, and OpenFTV derives the OPA
+    entrypoint from that (`determinePath`), so the decision is read from
+    `data.doelbinding.auto_sign_contract`. Renaming the package disables the
+    policy silently: the path resolves to nothing and every contract stays
+    pending.
+  - Private DvTP admission moved out of Rego into the demo
+    `dvtp-onboarding-register`: a small SQLite-backed UI keyed by the
+    20-character alphanumeric FSC Peer ID, with an active flag and explicit
+    source-holder checkboxes whose values are source-holder Peer IDs. OpenFTV
+    pulls its internal JSON endpoint every five seconds through native
+    `pipPullConfig` and exposes the entities to Rego; the policy compares the
+    local Manager's Peer ID directly with those admitted Peer IDs and keeps no
+    source-name translation table. The endpoint is reachable on the internal
+    Docker network, while the UI is bound to host loopback rather than exposed
+    on every interface. Technical peers such as the EUDI issuer are supplied by
+    deployment configuration and appear in the same policy feed without becoming
+    mutable UI records ([#230](https://github.com/ICTU/GBO-demo/issues/230)).
+  - The serviceConnection-only gate moved into the policy. `--auto-sign-grants`
+    and a PDP address are mutually exclusive — the Manager exits with _"cannot
+    combine the auto sign grants option with an auto-sign policy decision
+    point"_ — so without that check the registry rule alone would also accept
+    delegated grants.
+  - The payload the Manager sends is thin: contract hash, grant-type codes and
+    Peer IDs. No service name and no outway thumbprint, so the local source
+    Manager's Peer ID identifies which source-holder admission must be checked.
+    Deny reasons are `PARTY_NOT_IN_REGISTRY`, `PARTY_NOT_ACTIVE`,
+    `SOURCE_NOT_ALLOWED`, `GRANT_TYPE_NOT_ALLOWED`, `NO_COUNTERPARTY` and
+    `NOT_AN_AUTOSIGN_REQUEST`.
+  - Both sources are on it: `bd-manager` and `brp-manager`. Admission is
+    deliberately per source holder: ticking Belastingdienst stores its Peer ID
+    and does not admit the same private party to BRP. Service-specific admission
+    under one source-holder Peer ID requires OpenFSC to include the contract's
+    service details in the AuthZen autosign input and is tracked in
+    [#240](https://github.com/ICTU/GBO-demo/issues/240). Only
+    `directory-manager` keeps auto-signing by grant type, because the directory
+    is a registry rather than a policy party — it accepts service _publications_
+    from anyone in the group by design.
+  - A refusal leaves the contract **proposed**, not rejected.
+    `ReceiveContractHandler` places a signature when the PDP says yes and does
+    nothing when it says no; rejection is a separate, explicit action on the
+    Manager's internal API. That is the right default — a `rejected` signature
+    is distributed to the peers and terminal, so an automated "no" that turns
+    out to be premature could not be undone. Once the party is registered, the
+    consumer resubmits (new `iv` → new content hash → a new evaluation).
+  - `make fsc-all-up` now starts `openftv-pdp` before the FSC seeds run
+    (`make pdp-up`). The PDP lives in the main compose project, which used to
+    start after `fsc-infra`, so every seeded connection contract would have hung
+    pending until the seed's 30-second poll gave up without an error.
 - **Generic source onboarding and generated EUDI products.** Sources publish
   query, parameters, concrete `offers`, mapping and wallet Type Metadata on
   `/.well-known/gbo`. The adapter reconciles FSC contracts into atomic source
   activations; a generator turns every active offer into nl-wallet disclosure
-  and attestation settings, immutable Type Metadata and the frontend QR
-  catalog. The adapter and issuance-server no longer contain a hardcoded
+  and attestation settings, immutable Type Metadata and the frontend QR catalog.
+  The adapter and issuance-server no longer contain a hardcoded
   source/usecase/year catalog. The current proof retains the existing
   certificate references per activation; shared versus per-source certificate
   sets remains an open production decision.
-- **OpenFTV Manager: policy distribution as bundles (`make demo-manager`).** The PAP+PIP half of OpenFTV now runs alongside the PDP. Git remains canonical; a secret-backed deployment identity seeds policies into the Manager's Postgres, which bundles everything tagged `gbo-authz` and serves it to the PDP. The PDP pulls at boot (`PDP_BUNDLE_MANAGER`). Opt-in via the `manager` profile — without `GBO_BUNDLE_MANAGER` the PDP keeps loading `policies/` from disk with hot-reload. The Manager needs no patch, unlike the PDP, and all OpenFTV images use the same pinned commit (checked in CI).
-  - Managed Rego policies can only arrive over the API. `scripts/seed-openftv-manager.py` gets a short-lived OIDC token for the internal deployment identity and pushes `policies/` in, with ids derived as uuid5 of the repo-relative path so re-runs update in place. Git stays the source of truth; the Manager is the distribution mechanism. A separate `/authz` image directory contains only the Cedar policies protecting the Manager API.
-  - Policies that have left git are *retired* (the bundle's tag is stripped, so `eam/bundles/bundle.go` stops selecting them) rather than deleted, because `DELETE /v1/policy/:id` fails with a foreign-key violation on `policy_audit` upstream. Not cosmetic: the store is cumulative, and two policies declaring the same Rego `package` make the PDP fail to compile the whole set, so every request returns 500 until one is retired.
-  - `targets` is empty: the Manager can POST a bundle to a PDP, but the PDP authorizes its own management endpoints with the same policy set it evaluates requests against, so a push is denied by the GBO `package authz` entrypoint. OpenFTV installs `NoAuth` only when the policy store is empty — i.e. never in practice — so allowing the push would mean opening the PDP's management API from the decision policy. The PDP pulls instead.
-  - `MANAGER_POLICIES_LANGUAGE` is deliberately left at its Cedar default. It selects the language of the policies that authorize the Manager's *own* API: setting it to `rego` would make the GBO decision policy govern management requests, which use a different input shape. `MANAGER_AUTHORIZATION_FAIL_CLOSED_ON_EMPTY=true` prevents a missing or unreadable authorization-policy store from opening the API.
-  - Ships OpenFTV's own **management interface** (`services/openftv-manager-ui`) with a Keycloak realm behind it. Public visitors use the read-only `auditor` account; only the secret-backed internal deployment identity can write and publish. Cedar policies enforce this on the Manager API and fail closed when unavailable. The UI reads its capabilities from a top-level `roles` claim in the access token, which is a Keycloak shape — hence Keycloak rather than a smaller IdP. It must be served over HTTPS unless opened on `localhost`: the OIDC login uses PKCE, which needs `Crypto.subtle`, which browsers only expose in a secure context, so `http://<lan-ip>` fails outright. `GBO_FTV_MANAGER_URL` and `GBO_FTV_OIDC_AUTHORITY` are whole URLs so the stack can sit behind a TLS proxy on separate hostnames.
-  - The management interface's **Logboek** needs the Authorization Decision Log on Postgres at both ends — the Manager only registers those routes for a Postgres-backed ADL (any other value and the endpoints do not exist), and the PDP has to write to it. The ADL gets its own database: it carries its own migration set while the Manager's schema is at version 10, and both record progress in a `schema_migrations` table, so sharing one database makes the PDP's migration fail with "no migration found for version 10" and the PDP refuses to start. Independent of the embedded OPA console decision log the developer portal reads from Loki; outside the manager profile the PDP's ADL stays on stdout.
-  - Adopting the Manager does **not** fix decision-log masking, though issue #185 suspects it would. Bundle-delivered policies reach the engine through the same `UpsertPolicy` path as file-delivered ones (`eam/pdp/controller/bundle.go` → `PAP.ReplaceAll` → the PDP's event sink), never through OPA's bundle plugin, so `data.system.log.mask` never resolves either way.
-- **Akte van overlijden — a second bron and a second EUDI attestation.** New source service `brp-graphql-server` serving the BRP bronprofiel ([gbo-semantiek v0.3 `brp.graphql`](https://github.com/ICTU/gbo-semantiek/blob/main/v0.3/graphql/brp.graphql)): `IngeschrevenPersoon`/`Ingezetene`/`NietIngezetene`, nationaliteit, huwelijk, verblijfstitel, gezagsverhouding, immigratie and the binnen-/buitenlandse verblijfadres. A nabestaande discloses her PID and receives an `nl.gbo.brp.akte-van-overlijden` credential with her deceased partner's overlijdensgegevens; the query is rooted at her own persoonslijst and reaches the overledene only through `heeftHuwelijk.partners`, which is the authorization argument the policy mirrors. Mock data holds exactly one person who satisfies that shape (Frouke Jansen, BSN `999991772`, the PID-preprod persona); the other personen are married to a living partner, unmarried, or divorced.
-  - Registered as its own FSC service `brp` behind a separate local BRP/RvIG provider peer, with its own `brp-sidecar` instance. `seed-bri-contract.sh` is parameterised by provider, service and endpoint; `make fsc-seed-brp` seeds the peer and service.
-  - New policy rule `EUD0002` with scope `brp:akte:overlijden`. Its `covers_fields` are disjoint from `EUD0001`'s, so a BD scope cannot open the BRP path and vice versa; the BD path's per-year axis is declared off.
-  - Both bronprofielen expose `Query.ingeschrevenPersoon(bsn)` with a different `IngeschrevenPersoon`, so the two EUDI rules have to be told apart. That is done on scope and `covers_fields`, not on the flow: both run under `eudi:attestation`.
-  - The source publishes the BRP query, resolver output mapping, Type Metadata and wallet offer; the generic adapter selects the active source/type binding without a BRP-specific query or formatter.
-  - The credential carries what a Dutch akte van overlijden carries and nothing more: the overledene (naam, geboortedatum/-plaats/-land, geslacht), the overlijden (datum, plaats, land), the ouders, the echtgenoot or geregistreerd partner, and the verklaring. The query fetches more — `datumVoltrekking`/`plaatsVoltrekking`/`landVoltrekking`/`datumOntbinding`/`redenOntbinding` select the right marriage and establish that it ended in death — but those belong on the huwelijksakte and are dropped, as are the BSN and the persoonslijst-ids. Three fields a paper akte does carry are absent because the bronprofiel has no equivalent: gemeente van opmaak + aktenummer, the aangever, and the tijdstip van overlijden.
-- Repository governance files (`CODE_OF_CONDUCT.md`, `publiccode.yml`, `CHANGELOG.md`) and a `.github/workflows/codeql-analysis.yml` workflow to comply with the [ICTU GitHub policy](https://github.com/ictu/github-policy).
+- **OpenFTV Manager: policy distribution as bundles (`make demo-manager`).** The
+  PAP+PIP half of OpenFTV now runs alongside the PDP. Git remains canonical; a
+  secret-backed deployment identity seeds policies into the Manager's Postgres,
+  which bundles everything tagged `gbo-authz` and serves it to the PDP. The PDP
+  pulls at boot (`PDP_BUNDLE_MANAGER`). Opt-in via the `manager` profile —
+  without `GBO_BUNDLE_MANAGER` the PDP keeps loading `policies/` from disk with
+  hot-reload. The Manager needs no patch, unlike the PDP, and all OpenFTV images
+  use the same pinned commit (checked in CI).
+  - Managed Rego policies can only arrive over the API.
+    `scripts/seed-openftv-manager.py` gets a short-lived OIDC token for the
+    internal deployment identity and pushes `policies/` in, with ids derived as
+    uuid5 of the repo-relative path so re-runs update in place. Git stays the
+    source of truth; the Manager is the distribution mechanism. A separate
+    `/authz` image directory contains only the Cedar policies protecting the
+    Manager API.
+  - Policies that have left git are _retired_ (the bundle's tag is stripped, so
+    `eam/bundles/bundle.go` stops selecting them) rather than deleted, because
+    `DELETE /v1/policy/:id` fails with a foreign-key violation on `policy_audit`
+    upstream. Not cosmetic: the store is cumulative, and two policies declaring
+    the same Rego `package` make the PDP fail to compile the whole set, so every
+    request returns 500 until one is retired.
+  - `targets` is empty: the Manager can POST a bundle to a PDP, but the PDP
+    authorizes its own management endpoints with the same policy set it
+    evaluates requests against, so a push is denied by the GBO `package authz`
+    entrypoint. OpenFTV installs `NoAuth` only when the policy store is empty —
+    i.e. never in practice — so allowing the push would mean opening the PDP's
+    management API from the decision policy. The PDP pulls instead.
+  - `MANAGER_POLICIES_LANGUAGE` is deliberately left at its Cedar default. It
+    selects the language of the policies that authorize the Manager's _own_ API:
+    setting it to `rego` would make the GBO decision policy govern management
+    requests, which use a different input shape.
+    `MANAGER_AUTHORIZATION_FAIL_CLOSED_ON_EMPTY=true` prevents a missing or
+    unreadable authorization-policy store from opening the API.
+  - Ships OpenFTV's own **management interface** (`services/openftv-manager-ui`)
+    with a Keycloak realm behind it. Public visitors use the read-only `auditor`
+    account; only the secret-backed internal deployment identity can write and
+    publish. Cedar policies enforce this on the Manager API and fail closed when
+    unavailable. The UI reads its capabilities from a top-level `roles` claim in
+    the access token, which is a Keycloak shape — hence Keycloak rather than a
+    smaller IdP. It must be served over HTTPS unless opened on `localhost`: the
+    OIDC login uses PKCE, which needs `Crypto.subtle`, which browsers only
+    expose in a secure context, so `http://<lan-ip>` fails outright.
+    `GBO_FTV_MANAGER_URL` and `GBO_FTV_OIDC_AUTHORITY` are whole URLs so the
+    stack can sit behind a TLS proxy on separate hostnames.
+  - The management interface's **Logboek** needs the Authorization Decision Log
+    on Postgres at both ends — the Manager only registers those routes for a
+    Postgres-backed ADL (any other value and the endpoints do not exist), and
+    the PDP has to write to it. The ADL gets its own database: it carries its
+    own migration set while the Manager's schema is at version 10, and both
+    record progress in a `schema_migrations` table, so sharing one database
+    makes the PDP's migration fail with "no migration found for version 10" and
+    the PDP refuses to start. Independent of the embedded OPA console decision
+    log the developer portal reads from Loki; outside the manager profile the
+    PDP's ADL stays on stdout.
+  - Adopting the Manager does **not** fix decision-log masking, though issue
+    #185 suspects it would. Bundle-delivered policies reach the engine through
+    the same `UpsertPolicy` path as file-delivered ones
+    (`eam/pdp/controller/bundle.go` → `PAP.ReplaceAll` → the PDP's event sink),
+    never through OPA's bundle plugin, so `data.system.log.mask` never resolves
+    either way.
+- **Akte van overlijden — a second bron and a second EUDI attestation.** New
+  source service `brp-graphql-server` serving the BRP bronprofiel
+  ([gbo-semantiek v0.3 `brp.graphql`](https://github.com/ICTU/gbo-semantiek/blob/main/v0.3/graphql/brp.graphql)):
+  `IngeschrevenPersoon`/`Ingezetene`/`NietIngezetene`, nationaliteit, huwelijk,
+  verblijfstitel, gezagsverhouding, immigratie and the binnen-/buitenlandse
+  verblijfadres. A nabestaande discloses her PID and receives an
+  `nl.gbo.brp.akte-van-overlijden` credential with her deceased partner's
+  overlijdensgegevens; the query is rooted at her own persoonslijst and reaches
+  the overledene only through `heeftHuwelijk.partners`, which is the
+  authorization argument the policy mirrors. Mock data holds exactly one person
+  who satisfies that shape (Frouke Jansen, BSN `999991772`, the PID-preprod
+  persona); the other personen are married to a living partner, unmarried, or
+  divorced.
+  - Registered as its own FSC service `brp` behind a separate local BRP/RvIG
+    provider peer, with its own `brp-sidecar` instance. `seed-bri-contract.sh`
+    is parameterised by provider, service and endpoint; `make fsc-seed-brp`
+    seeds the peer and service.
+  - New policy rule `EUD0002` with scope `brp:akte:overlijden`. Its
+    `covers_fields` are disjoint from `EUD0001`'s, so a BD scope cannot open the
+    BRP path and vice versa; the BD path's per-year axis is declared off.
+  - Both bronprofielen expose `Query.ingeschrevenPersoon(bsn)` with a different
+    `IngeschrevenPersoon`, so the two EUDI rules have to be told apart. That is
+    done on scope and `covers_fields`, not on the flow: both run under
+    `eudi:attestation`.
+  - The source publishes the BRP query, resolver output mapping, Type Metadata
+    and wallet offer; the generic adapter selects the active source/type binding
+    without a BRP-specific query or formatter.
+  - The credential carries what a Dutch akte van overlijden carries and nothing
+    more: the overledene (naam, geboortedatum/-plaats/-land, geslacht), the
+    overlijden (datum, plaats, land), the ouders, the echtgenoot or
+    geregistreerd partner, and the verklaring. The query fetches more —
+    `datumVoltrekking`/`plaatsVoltrekking`/`landVoltrekking`/`datumOntbinding`/`redenOntbinding`
+    select the right marriage and establish that it ended in death — but those
+    belong on the huwelijksakte and are dropped, as are the BSN and the
+    persoonslijst-ids. Three fields a paper akte does carry are absent because
+    the bronprofiel has no equivalent: gemeente van opmaak + aktenummer, the
+    aangever, and the tijdstip van overlijden.
+- Repository governance files (`CODE_OF_CONDUCT.md`, `publiccode.yml`,
+  `CHANGELOG.md`) and a `.github/workflows/codeql-analysis.yml` workflow to
+  comply with the [ICTU GitHub policy](https://github.com/ictu/github-policy).
 - Repository-owner section in `README.md`.
 
 ### Changed
-- **Policy engine substituted: bare OPA → OpenFTV PDP (embedded OPA/Rego), with FSC-Inway connected directly.** The custom `pdp-service` (XACML context-handler) is retired: its two jobs moved into the OpenFTV PDP image. A GraphQL request-mapper (`services/openftv-pdp/mapper`, registered as `graphqltocontext`) walks the query schema-less — `scalar`/`known` come from the query shape, parent types from a generated field→type map (`scripts/gen-field-map.sh`, CI-checked) — and enriches the AuthZEN context with `resolved`, `resource`, `flow`, `trace_id` (Fsc-Transaction-Id) and per-request PIP (signed consent verified with live status for DvTP; EUDI `pid.pi` resolved through BSNk so the engine and its decision log never hold a BSN). Policies use the OpenFTV contract (`package authz` → `allow`/`reason`); the deny reason reaches the consumer via `reasonUser.en`. The dev-portal reads decisions from the OpenFTV decision log in Loki (normalised to the legacy popover shape) and policy sources from disk; `/explain?mode=full|fails` is dropped (no OpenFTV explain API). `bd-inway` points at `https://openftv-pdp:8443/authzen/v1` with the existing self-signed CA. Note `PDP_POLICIES_LANGUAGE=rego`: the documented value `OPA` makes OpenFTV silently skip all policy files (reported upstream).
-- **nl-wallet bumped v0.4.1 → v0.5.0 (`vendor/nl-wallet`), a lockstep migration.** v0.5.0 implements OpenID4VP 1.0's `client_id` rules: the loose `client_id_scheme` request field is gone and the `x509_san_dns:` prefix is mandatory, so a v0.4.1 wallet app and a v0.5.0 issuance-server cannot complete a session with each other in either direction. The pin comment claiming the preprod app *rejects* the prefixed `client_id` is retired with it.
-  - The `client_id` is no longer configured, it is derived, and **`EUDI_CLIENT_ID` is gone**. v0.5.0 builds it from the issuance-server's own `public_url` (`x509_san_dns:<host>`, `client_id_from_public_url`) and the wallet requires the `client_id` in the universal link to be byte-for-byte identical. The server can produce no other value — additional SANs on the reader certificate are never used as the `client_id` — so an override could only ever hold a value that breaks the session. The landing page and the developer portal derive it from `EUDI_PUBLIC_URL` instead, and the variable is removed from compose, both frontends' runtime config, `.env.example` and `OBSERVABILITY.md`.
-  - **`EUDI_READER_ORIGIN_URL` is gone** too. The local development certificate provider derives both the DNS SAN and `requestOriginBaseUrl` from `EUDI_PUBLIC_URL`, because the wallet compares them with the origin it actually reached and no independent value can work.
-  - The `EUDI_PUBLIC_URL` host became part of the crypto. v0.5.0 validates on startup that every reader certificate in `[disclosure_settings.*]` carries that host as a DNS SAN, so a tunnel hostname change is now a certificate change for every activated source. `make provision-development-certificates` explicitly refreshes the local leaves before source reconciliation; the CA stays fixed because it is the trust anchor.
-  - The standalone source-specific certificate scripts and env-var slots are replaced by the explicit adapter command and certificate references in activation records. Production onboarding never mints certificates and only consumes material provisioned by an authorized certificate-management process.
-  - PID and address merged into one `urn:eudi:pid:nl:1` credential upstream, and DigiD app2app was removed. Neither reaches this repo: every reader-auth config discloses only `bsn` from `urn:eudi:pid:nl:1`, and the demo does not use app2app.
-- GraphQL-playground moved from the bron to the developer-portal, and now covers every bron. `http://localhost:9003/playground` serves GraphiQL 5 + explorer + Voyager with a bron-keuze (`?bron=bd`, `?bron=brp`), each bron opening on its own example query — the akte-van-overlijden path for the BRP. Both tabs reach the bron over the portal's own origin (`/bron-api/<bron>/graphql`, proxied by nginx and by the dev-server), so no bron-port has to be published and the bron-servers need no CORS. The BRON-block in the strip links to the playground of the bron that run actually used. The tools are npm-dependencies now, so the ~90 lines of pinned CDN references and SRI hashes that the old page carried are gone with it — as is the page itself: `graphql-server` no longer serves `/playground` (a browser on `/graphql` gets GraphQL, not a redirect), and `brp-graphql-server` stops serving the GraphiQL 0.11 bundled with graphql-go/handler. `GRAPHQL_PUBLIC_URL` is retired: the playground is same-origin with the portal. Adding a third bronprofiel means one entry in `developer-portal/src/data/bronnen.ts` and one proxy route — no second page and no second set of pinned assets.
-- Developer-portal architecture strip follows the bron of the run it shows. The EUDI chain's last two nodes are no longer fixed to the BD pair: an akte-van-overlijden run lights up `brp-sidecar`/`brp-graphql-server` and labels them as the BRP pair, where before both spans fell through unmapped and the nodes stayed grey — reading as "not reached" while the run had in fact reached them. Which bron a run used comes from the run itself (`gbo.bron` on the eudi-adapter span, plus the bron-services in the trace), so the portal holds no usecase → bron table beside the adapter's catalog; a third bronprofiel adds its service names in `developer-portal/src/data/bronnen.ts` and nowhere else. The bron-sidecar image now takes its log- and span-identity from `OTEL_SERVICE_NAME`, so the `brp-sidecar` instance no longer reports itself as `bron-sidecar`.
-- Bron playground replaced: `graphql-server` now serves its own page on `/playground` (GraphiQL 5 with the explorer plugin for click-together queries, plus a Schema tab rendering the type graph with GraphQL Voyager) instead of the retired GraphQL Playground bundled with `graphql-go/handler`. Assets are pinned per version and SRI-checked; `/graphql` in a browser redirects to `/playground`, while `POST /graphql` and `GET /graphql?raw` are untouched.
-- `SECURITY.md` restructured with explicit *Current status*, *Supported versions*, and *Reporting a vulnerability* sections.
-- Bron GraphQL-schema switched from the custom `inkomensgegevens` shape to the BD bronprofiel schema ([gbo-semantiek v0.3 `bd.graphql`](https://github.com/ICTU/gbo-semantiek/blob/main/v0.3/graphql/bd.graphql)): queries now go via `ingeschrevenPersoon(bsn)` → `heeftBelastingjaarAangifte` → `AangifteIH` with `Bedrag` amounts. EUDI inkomensverklaring metadata updated accordingly (`peil_datum`/`grondslag_*`/`status_code` out, `indieningsdatum`/`status` in).
+
+- **Policy engine substituted: bare OPA → OpenFTV PDP (embedded OPA/Rego), with
+  FSC-Inway connected directly.** The custom `pdp-service` (XACML
+  context-handler) is retired: its two jobs moved into the OpenFTV PDP image. A
+  GraphQL request-mapper (`services/openftv-pdp/mapper`, registered as
+  `graphqltocontext`) walks the query schema-less — `scalar`/`known` come from
+  the query shape, parent types from a generated field→type map
+  (`scripts/gen-field-map.sh`, CI-checked) — and enriches the AuthZEN context
+  with `resolved`, `resource`, `flow`, `trace_id` (Fsc-Transaction-Id) and
+  per-request PIP (signed consent verified with live status for DvTP; EUDI
+  `pid.pi` resolved through BSNk so the engine and its decision log never hold a
+  BSN). Policies use the OpenFTV contract (`package authz` → `allow`/`reason`);
+  the deny reason reaches the consumer via `reasonUser.en`. The dev-portal reads
+  decisions from the OpenFTV decision log in Loki (normalised to the legacy
+  popover shape) and policy sources from disk; `/explain?mode=full|fails` is
+  dropped (no OpenFTV explain API). `bd-inway` points at
+  `https://openftv-pdp:8443/authzen/v1` with the existing self-signed CA. Note
+  `PDP_POLICIES_LANGUAGE=rego`: the documented value `OPA` makes OpenFTV
+  silently skip all policy files (reported upstream).
+- **nl-wallet bumped v0.4.1 → v0.5.0 (`vendor/nl-wallet`), a lockstep
+  migration.** v0.5.0 implements OpenID4VP 1.0's `client_id` rules: the loose
+  `client_id_scheme` request field is gone and the `x509_san_dns:` prefix is
+  mandatory, so a v0.4.1 wallet app and a v0.5.0 issuance-server cannot complete
+  a session with each other in either direction. The pin comment claiming the
+  preprod app _rejects_ the prefixed `client_id` is retired with it.
+  - The `client_id` is no longer configured, it is derived, and
+    **`EUDI_CLIENT_ID` is gone**. v0.5.0 builds it from the issuance-server's
+    own `public_url` (`x509_san_dns:<host>`, `client_id_from_public_url`) and
+    the wallet requires the `client_id` in the universal link to be
+    byte-for-byte identical. The server can produce no other value — additional
+    SANs on the reader certificate are never used as the `client_id` — so an
+    override could only ever hold a value that breaks the session. The landing
+    page and the developer portal derive it from `EUDI_PUBLIC_URL` instead, and
+    the variable is removed from compose, both frontends' runtime config,
+    `.env.example` and `OBSERVABILITY.md`.
+  - **`EUDI_READER_ORIGIN_URL` is gone** too. The local development certificate
+    provider derives both the DNS SAN and `requestOriginBaseUrl` from
+    `EUDI_PUBLIC_URL`, because the wallet compares them with the origin it
+    actually reached and no independent value can work.
+  - The `EUDI_PUBLIC_URL` host became part of the crypto. v0.5.0 validates on
+    startup that every reader certificate in `[disclosure_settings.*]` carries
+    that host as a DNS SAN, so a tunnel hostname change is now a certificate
+    change for every activated source. `make provision-development-certificates`
+    explicitly refreshes the local leaves before source reconciliation; the CA
+    stays fixed because it is the trust anchor.
+  - The standalone source-specific certificate scripts and env-var slots are
+    replaced by the explicit adapter command and certificate references in
+    activation records. Production onboarding never mints certificates and only
+    consumes material provisioned by an authorized certificate-management
+    process.
+  - PID and address merged into one `urn:eudi:pid:nl:1` credential upstream, and
+    DigiD app2app was removed. Neither reaches this repo: every reader-auth
+    config discloses only `bsn` from `urn:eudi:pid:nl:1`, and the demo does not
+    use app2app.
+- GraphQL-playground moved from the bron to the developer-portal, and now covers
+  every bron. `http://localhost:9003/playground` serves GraphiQL 5 + explorer +
+  Voyager with a bron-keuze (`?bron=bd`, `?bron=brp`), each bron opening on its
+  own example query — the akte-van-overlijden path for the BRP. Both tabs reach
+  the bron over the portal's own origin (`/bron-api/<bron>/graphql`, proxied by
+  nginx and by the dev-server), so no bron-port has to be published and the
+  bron-servers need no CORS. The BRON-block in the strip links to the playground
+  of the bron that run actually used. The tools are npm-dependencies now, so the
+  ~90 lines of pinned CDN references and SRI hashes that the old page carried
+  are gone with it — as is the page itself: `graphql-server` no longer serves
+  `/playground` (a browser on `/graphql` gets GraphQL, not a redirect), and
+  `brp-graphql-server` stops serving the GraphiQL 0.11 bundled with
+  graphql-go/handler. `GRAPHQL_PUBLIC_URL` is retired: the playground is
+  same-origin with the portal. Adding a third bronprofiel means one entry in
+  `developer-portal/src/data/bronnen.ts` and one proxy route — no second page
+  and no second set of pinned assets.
+- Developer-portal architecture strip follows the bron of the run it shows. The
+  EUDI chain's last two nodes are no longer fixed to the BD pair: an
+  akte-van-overlijden run lights up `brp-sidecar`/`brp-graphql-server` and
+  labels them as the BRP pair, where before both spans fell through unmapped and
+  the nodes stayed grey — reading as "not reached" while the run had in fact
+  reached them. Which bron a run used comes from the run itself (`gbo.bron` on
+  the eudi-adapter span, plus the bron-services in the trace), so the portal
+  holds no usecase → bron table beside the adapter's catalog; a third
+  bronprofiel adds its service names in `developer-portal/src/data/bronnen.ts`
+  and nowhere else. The bron-sidecar image now takes its log- and span-identity
+  from `OTEL_SERVICE_NAME`, so the `brp-sidecar` instance no longer reports
+  itself as `bron-sidecar`.
+- Bron playground replaced: `graphql-server` now serves its own page on
+  `/playground` (GraphiQL 5 with the explorer plugin for click-together queries,
+  plus a Schema tab rendering the type graph with GraphQL Voyager) instead of
+  the retired GraphQL Playground bundled with `graphql-go/handler`. Assets are
+  pinned per version and SRI-checked; `/graphql` in a browser redirects to
+  `/playground`, while `POST /graphql` and `GET /graphql?raw` are untouched.
+- `SECURITY.md` restructured with explicit _Current status_, _Supported
+  versions_, and _Reporting a vulnerability_ sections.
+- Bron GraphQL-schema switched from the custom `inkomensgegevens` shape to the
+  BD bronprofiel schema
+  ([gbo-semantiek v0.3 `bd.graphql`](https://github.com/ICTU/gbo-semantiek/blob/main/v0.3/graphql/bd.graphql)):
+  queries now go via `ingeschrevenPersoon(bsn)` → `heeftBelastingjaarAangifte` →
+  `AangifteIH` with `Bedrag` amounts. EUDI inkomensverklaring metadata updated
+  accordingly (`peil_datum`/`grondslag_*`/`status_code` out,
+  `indieningsdatum`/`status` in).
 
 ### Added
-- Per-year policy enforcement: `heeftBelastingjaarAangifte` accepts a `belastingjaren` filter (demo-bron extension of the upstream schema) so the PDP can see the requested years. New `years_in_scopes` rule axis requires every requested belastingjaar to be covered by a `bd:ib:<year>` scope in the consent (DVT0001) or the rule's `allowed_scopes` (EUD0001) — a query for a year the citizen did not consent to fails with `YEAR_NOT_COVERED`; a missing year filter fails closed.
-- Flow dispatch in the GBO rule-engine: consent-based rules (DVT0001) only fire when `pip.consent` is present, PID-based rules (EUD0001) only when `pip.pid` is present, so deny reasons come from the flow's own rule (implements the dispatch the rule files already documented).
-- Signed DvTP authorization context: the consent-register returns an ES256 consent token containing the consent ID, PI, scopes, recipient OIN and validity, but persists only a consent-portal-scoped subject reference. The PDP verifies type, key ID, signature, issuer, audience and time claims, checks the exact record's live status, binds the signed recipient OIN to the FSC caller and fails closed when validation or status lookup is unavailable. Tokens travel in a URL fragment and are scrubbed immediately; observer/history payloads suppress PI and token material.
-- Compose host ports are configurable via `GBO_PORT_*` env vars (defaults unchanged), so two worktree stacks can run side by side.
-- fsc-infra is deployable per worktree: `FSC_PROJECT_NAME` + `FSC_PORT_*` in `fsc-infra/.env` (project name, network, host ports) and `FSC_INFRA_NETWORK` in the root `.env` let multiple checkouts run isolated FSC instances side by side.
-- Dev-portal scenario `use-jaar-niet-geconsenteerd-deny` demonstrating per-year consent.
-- Demo policies (Rego) and GraphQL mirror-schemas are now baked into the `opa` and `pdp-service` images (`services/opa/Dockerfile`, `services/pdp-service/Dockerfile`, build context = repo root). The compose stack and the Helm example values no longer mount them; a volume mount at `/policies` or `/schemas` still shadows the baked-in files if present.
-- DvTP browser flow: the dienstverlener-backend intersects requested belastingjaren with the consent's scopes and only queries consented years; unconsented years are returned as `denied_years` and rendered greyed out in the dienstverlener-mock result page instead of failing the whole query.
-- Landing page (`landing-page`, :9000): a public front door for the demo that explains what GBO is and sketches the three flows (DvTP, EUDI, OOTS) over the shared pipeline. "Zelf uitproberen" offers exactly the two flows that are live — start the DvTP flow at HypotheekBV (with the consent portal named as its second step rather than as a separate entry point), or scan a wallet QR rendered on the page itself. The available wallet products are loaded from the `eudi-offers.json` catalog generated from active source offers; the universal link still uses `EUDI_PUBLIC_URL`, the generated product key and `client_id`. The wallet opens the session against the issuance-server on scan, so the page needs no backend. Without `EUDI_PUBLIC_URL` it explains why there is nothing to scan instead of showing a dead QR. The developer portal is presented separately as an inspection console to open *after* a flow, not as a third thing to try. Every outbound link is resolved at runtime (`VITE_*` on the dev-server, `runtime-config.js` via envsubst in the nginx image) so the same image serves both the local stack and a deployed environment.
-- Bron GraphQL playground: `graphql-server` now serves the GraphQL Playground bundled with `graphql-go/handler` (dark, with a Docs + Schema explorer) on a browser `GET /graphql` instead of GraphiQL 0.11, and the developer portal's BRON block deep-links to it via `GRAPHQL_PUBLIC_URL` with a query prefilled through the `query` URL param. `POST /graphql` and `?raw` still return GraphQL results. Introspection was already enabled — graphql-go answers `__schema`/`__type` unconditionally — and is now covered by a test. The playground reaches the bron directly, so it bypasses FSC-Inway, the sidecar, the PEP and the PDP: no consent check, no BSN pseudonymisation, as the prefilled query's leading comment states.
+
+- Per-year policy enforcement: `heeftBelastingjaarAangifte` accepts a
+  `belastingjaren` filter (demo-bron extension of the upstream schema) so the
+  PDP can see the requested years. New `years_in_scopes` rule axis requires
+  every requested belastingjaar to be covered by a `bd:ib:<year>` scope in the
+  consent (DVT0001) or the rule's `allowed_scopes` (EUD0001) — a query for a
+  year the citizen did not consent to fails with `YEAR_NOT_COVERED`; a missing
+  year filter fails closed.
+- Flow dispatch in the GBO rule-engine: consent-based rules (DVT0001) only fire
+  when `pip.consent` is present, PID-based rules (EUD0001) only when `pip.pid`
+  is present, so deny reasons come from the flow's own rule (implements the
+  dispatch the rule files already documented).
+- Signed DvTP authorization context: the consent-register returns an ES256
+  consent token containing the consent ID, PI, scopes, recipient OIN and
+  validity, but persists only a consent-portal-scoped subject reference. The PDP
+  verifies type, key ID, signature, issuer, audience and time claims, checks the
+  exact record's live status, binds the signed recipient OIN to the FSC caller
+  and fails closed when validation or status lookup is unavailable. Tokens
+  travel in a URL fragment and are scrubbed immediately; observer/history
+  payloads suppress PI and token material.
+- Compose host ports are configurable via `GBO_PORT_*` env vars (defaults
+  unchanged), so two worktree stacks can run side by side.
+- fsc-infra is deployable per worktree: `FSC_PROJECT_NAME` + `FSC_PORT_*` in
+  `fsc-infra/.env` (project name, network, host ports) and `FSC_INFRA_NETWORK`
+  in the root `.env` let multiple checkouts run isolated FSC instances side by
+  side.
+- Dev-portal scenario `use-jaar-niet-geconsenteerd-deny` demonstrating per-year
+  consent.
+- Demo policies (Rego) and GraphQL mirror-schemas are now baked into the `opa`
+  and `pdp-service` images (`services/opa/Dockerfile`,
+  `services/pdp-service/Dockerfile`, build context = repo root). The compose
+  stack and the Helm example values no longer mount them; a volume mount at
+  `/policies` or `/schemas` still shadows the baked-in files if present.
+- DvTP browser flow: the dienstverlener-backend intersects requested
+  belastingjaren with the consent's scopes and only queries consented years;
+  unconsented years are returned as `denied_years` and rendered greyed out in
+  the dienstverlener-mock result page instead of failing the whole query.
+- Landing page (`landing-page`, :9000): a public front door for the demo that
+  explains what GBO is and sketches the three flows (DvTP, EUDI, OOTS) over the
+  shared pipeline. "Zelf uitproberen" offers exactly the two flows that are live
+  — start the DvTP flow at HypotheekBV (with the consent portal named as its
+  second step rather than as a separate entry point), or scan a wallet QR
+  rendered on the page itself. The available wallet products are loaded from the
+  `eudi-offers.json` catalog generated from active source offers; the universal
+  link still uses `EUDI_PUBLIC_URL`, the generated product key and `client_id`.
+  The wallet opens the session against the issuance-server on scan, so the page
+  needs no backend. Without `EUDI_PUBLIC_URL` it explains why there is nothing
+  to scan instead of showing a dead QR. The developer portal is presented
+  separately as an inspection console to open _after_ a flow, not as a third
+  thing to try. Every outbound link is resolved at runtime (`VITE_*` on the
+  dev-server, `runtime-config.js` via envsubst in the nginx image) so the same
+  image serves both the local stack and a deployed environment.
+- Bron GraphQL playground: `graphql-server` now serves the GraphQL Playground
+  bundled with `graphql-go/handler` (dark, with a Docs + Schema explorer) on a
+  browser `GET /graphql` instead of GraphiQL 0.11, and the developer portal's
+  BRON block deep-links to it via `GRAPHQL_PUBLIC_URL` with a query prefilled
+  through the `query` URL param. `POST /graphql` and `?raw` still return GraphQL
+  results. Introspection was already enabled — graphql-go answers
+  `__schema`/`__type` unconditionally — and is now covered by a test. The
+  playground reaches the bron directly, so it bypasses FSC-Inway, the sidecar,
+  the PEP and the PDP: no consent check, no BSN pseudonymisation, as the
+  prefilled query's leading comment states.
 
 ## [0.1.0] - 2026-07-20
 
 ### Added
-- Initial import of the GBO reference-architecture demo (consent + wallet flows over OpenFSC v2.4.0).
+
+- Initial import of the GBO reference-architecture demo (consent + wallet flows
+  over OpenFSC v2.4.0).

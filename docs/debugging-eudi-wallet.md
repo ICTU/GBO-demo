@@ -1,12 +1,12 @@
 # Debugging the EUDI wallet flow
 
-A runbook for when scanning a QR does not produce a credential. Written after
-a migration to nl-wallet v0.5.0 in which the actual cause — our CA missing
-from the wallet's trust list — took a full day to find, because the wallet
-cannot report that particular failure at all.
+A runbook for when scanning a QR does not produce a credential. Written after a
+migration to nl-wallet v0.5.0 in which the actual cause — our CA missing from
+the wallet's trust list — took a full day to find, because the wallet cannot
+report that particular failure at all.
 
-Read the triage table first. Almost every wrong turn below came from
-diagnosing before establishing which of the four states we were in.
+Read the triage table first. Almost every wrong turn below came from diagnosing
+before establishing which of the four states we were in.
 
 ## 1. Triage: what the session state tells you
 
@@ -18,21 +18,20 @@ docker compose exec -T postgres-eudi psql -U wallet -d issuance_server \
   -A -F'|' -c "select last_active_date_time, data::text from session_state order by last_active_date_time desc limit 5;"
 ```
 
-| state | meaning | look at |
-| --- | --- | --- |
-| **no session at all** | the wallet never reached us | tunnel / reachability (§3) |
-| **`WaitingForResponse`**, nothing posted | the wallet fetched the request and abandoned it *before it could report an error* | trust anchors (§4) — this is the silent one |
-| **`FAILED`** with `error_description` | the wallet rejected the request and said why | read the message; it names the cause |
-| **`CANCELLED`** | the wallet posted `access_denied` | user dismissed a screen, or no matching credential (§5) |
+| state                                    | meaning                                                                           | look at                                                 |
+| ---------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| **no session at all**                    | the wallet never reached us                                                       | tunnel / reachability (§3)                              |
+| **`WaitingForResponse`**, nothing posted | the wallet fetched the request and abandoned it _before it could report an error_ | trust anchors (§4) — this is the silent one             |
+| **`FAILED`** with `error_description`    | the wallet rejected the request and said why                                      | read the message; it names the cause                    |
+| **`CANCELLED`**                          | the wallet posted `access_denied`                                                 | user dismissed a screen, or no matching credential (§5) |
 
 The asymmetry matters. A rejected certificate, a `client_id` mismatch, a bad
-`response_uri` or an unsupported encryption algorithm all produce **FAILED
-with a reason** — `report_error_back` in
-`disclosure_session/client.rs` handles exactly that set. If you have a reason
-to read, trust it.
+`response_uri` or an unsupported encryption algorithm all produce **FAILED with
+a reason** — `report_error_back` in `disclosure_session/client.rs` handles
+exactly that set. If you have a reason to read, trust it.
 
-`WaitingForResponse` with no follow-up means the opposite: the failure
-happened somewhere that *structurally cannot* report. See §4.
+`WaitingForResponse` with no follow-up means the opposite: the failure happened
+somewhere that _structurally cannot_ report. See §4.
 
 ## 2. Is the server even correct? Verify it in one step
 
@@ -63,8 +62,8 @@ What must hold under v0.5.0:
 - the `response_uri` **FQDN equals** `client_id`'s host
 - EKU is `1.0.18013.5.1.6` (ReaderAuth); `aud` is `https://self-issued.me/v2`
 
-All three of the first are derived from `EUDI_PUBLIC_URL`, so they cannot
-drift — the server derives its `client_id` in `verifier.rs`
+All three of the first are derived from `EUDI_PUBLIC_URL`, so they cannot drift
+— the server derives its `client_id` in `verifier.rs`
 (`client_id_from_public_url`) and the frontends derive theirs from the same
 variable.
 
@@ -104,9 +103,9 @@ let response_uri = vp_auth_request.response_uri.clone();   // ← extracted only
 `try_new` verifies the x5c chain against the wallet's trust anchors. The `?`
 propagates immediately — and `response_uri` does not exist yet, so the wallet
 has nowhere to send an error. The verifier sees a session hang forever with no
-diagnostic. `RpCertificate` *is* in `report_error_back`, but it is only
-reachable from `process_auth_request`, which runs later. **Do not conclude
-from that list that a certificate problem would have been reported.**
+diagnostic. `RpCertificate` _is_ in `report_error_back`, but it is only
+reachable from `process_auth_request`, which runs later. **Do not conclude from
+that list that a certificate problem would have been reported.**
 
 The absence of the organisation name is corroborating: the app picks
 `…ErrorDescriptionWithOrganizationName` only when it has one, and it has one
@@ -132,14 +131,15 @@ for label, anchors in (('READER / RP (may request)', d['disclosure']['rp_trust_a
 "
 ```
 
-URL pattern: `https://static.<environment>.wallet.edi.bzk.nl/config/v1/wallet-config`
-(from `scripts/generate-wallet-config.sh` in the nl-wallet sources).
+URL pattern:
+`https://static.<environment>.wallet.edi.bzk.nl/config/v1/wallet-config` (from
+`scripts/generate-wallet-config.sh` in the nl-wallet sources).
 
 Our CA must appear in **`disclosure.rp_trust_anchors`**. If it does not, no
 local change can fix it — BZK's operations team maintains that list. Their own
-documentation (`community/create-a-ca.html`) says: *"You can e-mail the public
+documentation (`community/create-a-ca.html`) says: _"You can e-mail the public
 key to the e-mail address of the operations team. They will configure this key
-in the issuer and reader trust anchors of the NL Wallet."*
+in the issuer and reader trust anchors of the NL Wallet."_
 
 Two things to state when asking:
 
@@ -147,9 +147,9 @@ Two things to state when asking:
   same-version republish, so editing in place reaches nobody
 - it must be signed with the **same key**, which is compiled into the app
 
-The app polls hourly and persists the result to `storage_path/configuration.jwt`,
-so a published fix reaches devices without an app release. Re-run the command
-above to watch the `version` change.
+The app polls hourly and persists the result to
+`storage_path/configuration.jwt`, so a published fix reaches devices without an
+app release. Re-run the command above to watch the `version` change.
 
 ## 5. `CANCELLED`: the wallet declined
 
@@ -159,17 +159,17 @@ above to watch the `version` change.
 - the user dismissed an error screen
 - **no matching credential.** On missing attributes the app deliberately does
   not respond ("Store the session so that it will only be terminated on user
-  interaction. This prevents gleaning of missing attributes by a verifier"),
-  so the session waits until the user taps away, then goes `CANCELLED`
+  interaction. This prevents gleaning of missing attributes by a verifier"), so
+  the session waits until the user taps away, then goes `CANCELLED`
 
-A third, easy to miss: **every claim the credential carries in plaintext must
-be explicitly requested.** `verify_non_selectively_disclosable_claims` rejects
-a request that omits any non-selectively-disclosable claim — and it runs
-*before* the missing-attributes check, on already-matched credentials.
+A third, easy to miss: **every claim the credential carries in plaintext must be
+explicitly requested.** `verify_non_selectively_disclosable_claims` rejects a
+request that omits any non-selectively-disclosable claim — and it runs _before_
+the missing-attributes check, on already-matched credentials.
 
 Note `fetch_candidate_attestations` only selects credentials containing **all**
 requested claims, so over-requesting to test something makes a credential stop
-matching entirely and produces a *different* silent failure. Bisect carefully.
+matching entirely and produces a _different_ silent failure. Bisect carefully.
 
 ## 6. Tracing an app error to its cause
 
@@ -179,8 +179,8 @@ The method that finally worked, when the server side looks correct:
    key such as `issuanceRelyingPartyErrorDescription`
 2. Grep that key in `*.dart` → the state class (`IssuanceRelyingPartyError`)
 3. Follow to `core_error_mapper.dart` → the `FlutterApiErrorType`
-4. Grep that variant in `wallet_core/flutter_api/src/errors.rs` → the Rust
-   error variants that map to it
+4. Grep that variant in `wallet_core/flutter_api/src/errors.rs` → the Rust error
+   variants that map to it
 5. Grep those variants in `wallet_core/wallet/src/` → the code that raises them
 
 The sources are in `vendor/nl-wallet`, so this is all local:
@@ -193,17 +193,17 @@ pinned submodule commit and which trust list it is using.
 ## 7. Traps that cost real time
 
 **Stale issuance-server image.** `make eudi-images` used to skip whenever any
-image existed, silently running the previous pin against the new config.
-It now stamps the nl-wallet revision as a label and compares. If the build
-says a version you did not expect, check `NLWALLET_PATH` in `.env` — an
-override there wins over the submodule via `?=`.
+image existed, silently running the previous pin against the new config. It now
+stamps the nl-wallet revision as a label and compares. If the build says a
+version you did not expect, check `NLWALLET_PATH` in `.env` — an override there
+wins over the submodule via `?=`.
 
 **Submodule not updated on branch switch.** `git submodule status` showing a
 leading `+` means the checkout differs from what the branch pins. Switching
 branches does not move submodules.
 
-**`restart` versus `up -d`.** Certificates arrive through a *bind-mounted*
-file, so compose cannot see the change: `up -d` alone will not restart the
+**`restart` versus `up -d`.** Certificates arrive through a _bind-mounted_ file,
+so compose cannot see the change: `up -d` alone will not restart the
 issuance-server. Frontend env vars are the opposite: `restart` does not re-read
 `.env`. After a change touching both, you need all three:
 
@@ -213,8 +213,8 @@ make eudi-config && docker compose --profile eudi up -d && \
 ```
 
 **Database migration history.** Upgrading across an nl-wallet version that
-renames a migration fails with *"migration has been applied but its file is
-missing"* — v0.5.0 renamed `m20250925_000003_create_status_lists` to
+renames a migration fails with _"migration has been applied but its file is
+missing"_ — v0.5.0 renamed `m20250925_000003_create_status_lists` to
 `…_create_status_list` (content identical). Either rename the row in
 `seaql_migrations` or wipe the volume with `down -v`.
 
@@ -224,13 +224,13 @@ replaces in place, removes later duplicates and backs up first.
 
 **Single-file bind mounts break on `git checkout`.** The frontends mount
 individual files (`vite.config.ts`, `index.html`, `tsconfig.json`), and a bind
-mount of a *file* binds the inode. `git checkout` unlinks and recreates rather
+mount of a _file_ binds the inode. `git checkout` unlinks and recreates rather
 than editing in place, so after a branch switch the container sees
-`No such file or directory` while `docker inspect` still lists the mount.
-Vite then restarts without any proxy configuration and every `/api/dev/*`
-request falls through to the SPA fallback — the browser reports
-*"Unexpected token '<', "<!doctype "... is not valid JSON"*, which reads like
-a backend failure but is a stale mount. Confirm and fix:
+`No such file or directory` while `docker inspect` still lists the mount. Vite
+then restarts without any proxy configuration and every `/api/dev/*` request
+falls through to the SPA fallback — the browser reports _"Unexpected token '<',
+"<!doctype "... is not valid JSON"_, which reads like a backend failure but is a
+stale mount. Confirm and fix:
 
 ```bash
 docker compose exec -T developer-portal ls -l /app/vite.config.ts   # missing?
@@ -251,16 +251,16 @@ docker compose logs --timestamps --no-log-prefix <svc> | awk '$1 >= "2026-08-03T
 **Services log in different timezones.** Compare on the Docker timestamp, not
 the application's own.
 
-**`make eudi-config` overwrites the rendered config.** When testing a change
-to `issuance_server.toml` directly, do not run it until you are done — and it
-is also the easiest way to revert.
+**`make eudi-config` overwrites the rendered config.** When testing a change to
+`issuance_server.toml` directly, do not run it until you are done — and it is
+also the easiest way to revert.
 
 ## 8. What changed in v0.5.0
 
 - `client_id` must carry the `x509_san_dns:` prefix; the loose
   `client_id_scheme` field is gone. Server and app move in **lockstep**
-- the `EUDI_PUBLIC_URL` host became part of the crypto: reader certificates
-  must list it as a DNS SAN, and `response_uri`'s FQDN must equal it
+- the `EUDI_PUBLIC_URL` host became part of the crypto: reader certificates must
+  list it as a DNS SAN, and `response_uri`'s FQDN must equal it
 - PID and address merged into one `urn:eudi:pid:nl:1`; the address is now the
   sub-claim `urn:eudi:pid:nl:1.address`
 - `EUDI_CLIENT_ID` and `EUDI_READER_ORIGIN_URL` were removed — both are now
@@ -268,17 +268,17 @@ is also the easiest way to revert.
 
 ## 9. Known-good reference values
 
-| | |
-| --- | --- |
-| trust list | `https://static.preproductie.wallet.edi.bzk.nl/config/v1/wallet-config` |
+|                     |                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------- |
+| trust list          | `https://static.preproductie.wallet.edi.bzk.nl/config/v1/wallet-config`         |
 | universal link base | `https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance` |
-| PID vct | `urn:eudi:pid:nl:1`, format `dc+sd-jwt` |
-| our CAs | `ca.gbo-reader` (readers), `ca.gbo-issuer` (issuers + status list) |
-| reader EKU | `1.0.18013.5.1.6` |
-| issuer EKU | `1.0.18013.5.1.2` |
-| status-list EKU | `1.3.6.1.5.5.7.3.127` |
+| PID vct             | `urn:eudi:pid:nl:1`, format `dc+sd-jwt`                                         |
+| our CAs             | `ca.gbo-reader` (readers), `ca.gbo-issuer` (issuers + status list)              |
+| reader EKU          | `1.0.18013.5.1.6`                                                               |
+| issuer EKU          | `1.0.18013.5.1.2`                                                               |
+| status-list EKU     | `1.3.6.1.5.5.7.3.127`                                                           |
 
 Neither CA carries a name-constraints extension, so leaf hostnames are free —
-only the CA has to stay fixed, because that is what the wallet trusts.
-**Never mint a new CA to solve a hostname problem**: a leaf under an unknown
-root is rejected by every wallet and cannot be recovered locally.
+only the CA has to stay fixed, because that is what the wallet trusts. **Never
+mint a new CA to solve a hostname problem**: a leaf under an unknown root is
+rejected by every wallet and cannot be recovered locally.

@@ -4,30 +4,33 @@ Common problems on first boot of the demo stack. See also `README.md`.
 
 ## Port conflicts
 
-The demo uses ports `9000-9686`. If something fails with "port already allocated":
+The demo uses ports `9000-9686`. If something fails with "port already
+allocated":
 
 ```bash
 lsof -i -P -n | grep LISTEN | grep -E ":9[0-9]{3}"
 ```
 
-Fix by running `make demo-down` (or `docker compose down` for the relevant compose file), or stop the conflicting service.
+Fix by running `make demo-down` (or `docker compose down` for the relevant
+compose file), or stop the conflicting service.
 
 ## "Blocked request" or 403 from another machine
 
-Vite's dev server refuses host names it does not know. Set `GBO_PUBLIC_HOST`
-in `.env` (more names in `GBO_EXTRA_ALLOWED_HOSTS`, comma-separated) and run
+Vite's dev server refuses host names it does not know. Set `GBO_PUBLIC_HOST` in
+`.env` (more names in `GBO_EXTRA_ALLOWED_HOSTS`, comma-separated) and run
 `make demo`. The same setting fixes links that point at `localhost`.
 
 ## Docker resource limits
 
-`make demo-eudi` and `make demo-full` start many containers, most of them
-FSC infrastructure. Minimum:
+`make demo-eudi` and `make demo-full` start many containers, most of them FSC
+infrastructure. Minimum:
 
 - **RAM**: 8 GB allocated to Docker (Preferences → Resources → Memory)
 - **CPU**: no strict requirement, but slow below 4 cores
 - **Disk**: ~10 GB for images
 
-Symptoms of insufficient RAM: containers crash at random, `docker compose logs` shows OOM kills.
+Symptoms of insufficient RAM: containers crash at random, `docker compose logs`
+shows OOM kills.
 
 ## `healthcheck.start_interval` requires Docker Engine v25
 
@@ -37,17 +40,16 @@ Symptoms of insufficient RAM: containers crash at random, `docker compose logs` 
 can't set healthcheck.start_interval as feature require Docker Engine v25 or later
 ```
 
-Docker Compose v2.24 to v5.0.2 refuse `start_interval` when the engine reports
-a Docker API below 1.44, that is Docker Engine before 25.
-Check with `docker version --format '{{.Server.APIVersion}}'` and upgrade the
-engine.
+Docker Compose v2.24 to v5.0.2 refuse `start_interval` when the engine reports a
+Docker API below 1.44, that is Docker Engine before 25. Check with
+`docker version --format '{{.Server.APIVersion}}'` and upgrade the engine.
 
 ## Missing certificates
 
 The `demo-*` targets generate the local FSC certificates in the correct order.
 Certificate mount failures normally mean the stack was started directly with
-`docker compose` before bootstrap completed. Prefer `make demo-eudi`, or run
-the certificate target manually:
+`docker compose` before bootstrap completed. Prefer `make demo-eudi`, or run the
+certificate target manually:
 
 ```bash
 make fsc-certs
@@ -55,10 +57,10 @@ make fsc-certs
 
 ## A migration fails
 
-Each FSC migration runs once, after `postgres-init` has created the
-databases, and its peer services start only when it has completed. When one
-fails, `up` stops with `service "edi-migrations-manager" didn't complete
-successfully`. Read its log, fix the cause and run the `make` target again:
+Each FSC migration runs once, after `postgres-init` has created the databases,
+and its peer services start only when it has completed. When one fails, `up`
+stops with `service "edi-migrations-manager" didn't complete successfully`. Read
+its log, fix the cause and run the `make` target again:
 
 ```bash
 docker compose -f fsc-infra/docker-compose.yml logs postgres-init edi-migrations-manager
@@ -73,20 +75,22 @@ Check the `make fsc-seed-bri` output. Common causes:
   `fsc-infra/.env`. This happens with a second clone or worktree on the same
   machine: the FSC stack's Compose project is `fsc-infra` in every checkout
   unless `FSC_PROJECT_NAME` is set in `fsc-infra/.env`, so the new checkout
-  reuses the old checkout's volume while `make` generates a new password.
-  Either give the new checkout its own FSC project by setting
-  `FSC_PROJECT_NAME` in its `fsc-infra/.env` before the first `make demo`, or,
-  when the old FSC state is disposable, run `make fsc-clean` and start again.
-  `make fsc-clean` removes the shared `fsc-infra` volumes, including those of
-  the other checkout.
-- **HTTP 500 `unknown protocol`**: manager v2.4.0 versus script mismatch. Verify that `services/dev-portal-backend/fsctxlog.go` and this script use the same FSC version.
-- **HTTP 401**: inspect the responding Manager's logs and the client
-  certificate used by the seed. Auto-sign configuration is separate:
-  `directory-manager` uses `--auto-sign-grants=servicePublication`; source
-  Managers use `--authzen-auto-sign-pdp-address` for connection contracts.
-  These two options cannot be combined on one Manager.
+  reuses the old checkout's volume while `make` generates a new password. Either
+  give the new checkout its own FSC project by setting `FSC_PROJECT_NAME` in its
+  `fsc-infra/.env` before the first `make demo`, or, when the old FSC state is
+  disposable, run `make fsc-clean` and start again. `make fsc-clean` removes the
+  shared `fsc-infra` volumes, including those of the other checkout.
+- **HTTP 500 `unknown protocol`**: manager v2.4.0 versus script mismatch. Verify
+  that `services/dev-portal-backend/fsctxlog.go` and this script use the same
+  FSC version.
+- **HTTP 401**: inspect the responding Manager's logs and the client certificate
+  used by the seed. Auto-sign configuration is separate: `directory-manager`
+  uses `--auto-sign-grants=servicePublication`; source Managers use
+  `--authzen-auto-sign-pdp-address` for connection contracts. These two options
+  cannot be combined on one Manager.
 - **Publication contract stays pending**: `directory-manager` signs these by
   grant type. Wait 5-10s and check the publication state at `bd-manager`:
+
   ```bash
   docker run --rm --network fsc-infra_default \
     -v $(pwd)/fsc-infra:/work:ro gbo-demo/pki-tools:local \
@@ -96,55 +100,55 @@ Check the `make fsc-seed-bri` output. Common causes:
                     "https://bd-manager:9443/v1/contracts?grant_type=GRANT_TYPE_SERVICE_PUBLICATION" | jq'
   ```
 
-- **Connection contract stays pending**: the source Manager asks the
-  auto-sign PDP to decide whether to counter-sign. Inspect the decision:
+- **Connection contract stays pending**: the source Manager asks the auto-sign
+  PDP to decide whether to counter-sign. Inspect the decision:
 
   ```bash
   docker compose logs --no-log-prefix openftv-pdp \
     | grep auto_sign_contract | tail -1 | jq .result.response
   ```
 
-  `ADMISSION_REGISTER_UNAVAILABLE` means the PDP could not read the
-  onboarding register: check that `dvtp-onboarding-register` is running.
-  `PARTY_NOT_IN_REGISTRY` means the register answered but does not contain
-  the peer: admit that peer in the register. The source Manager does not
+  `ADMISSION_REGISTER_UNAVAILABLE` means the PDP could not read the onboarding
+  register: check that `dvtp-onboarding-register` is running.
+  `PARTY_NOT_IN_REGISTRY` means the register answered but does not contain the
+  peer: admit that peer in the register. The source Manager does not
   counter-sign in either case, and does not ask again: re-run the seed.
 
 ## `fsc-seed-consent-authorization` stops: not admitted to the consent register
 
-The consent register's Manager (peer `99999999900000000700`) signs a
-connection to `consent-authorization` only for a participant the DvTP
-onboarding register admits to that peer. The demo configuration admits
-Hypotheek-BV (`99999999900000000300`) and the Installatie Register
-(`99999999900000001000`), but the register writes its seed participants into
-a new volume only. A volume from before that admission keeps the old sources,
-and the seed target stops with an error that names the missing participants.
-Fix it in one of two ways, then run `make demo` again:
+The consent register's Manager (peer `99999999900000000700`) signs a connection
+to `consent-authorization` only for a participant the DvTP onboarding register
+admits to that peer. The demo configuration admits Hypotheek-BV
+(`99999999900000000300`) and the Installatie Register (`99999999900000001000`),
+but the register writes its seed participants into a new volume only. A volume
+from before that admission keeps the old sources, and the seed target stops with
+an error that names the missing participants. Fix it in one of two ways, then
+run `make demo` again:
 
 - In the register's admin UI (`http://localhost:9415`), add
-  `99999999900000000700` to the sources of each named participant. The PDP
-  pulls the register every 5 seconds.
+  `99999999900000000700` to the sources of each named participant. The PDP pulls
+  the register every 5 seconds.
 - Reset the register with all other demo data of the main stack:
   `make demo-down`, then `docker compose down -v`.
 
 ## Every request denies with `NO_APPLICABLE_RULE`
 
-`NO_APPLICABLE_RULE` is the engine's closed-world default: no rule declares
-the requested field. Check the field against `covers_fields` in
-`policies/gbo/rules/` first — that, not the grant, is the catalog. A rule
-that names `services` binds only on those FSC services: `ASI0001` covers
+`NO_APPLICABLE_RULE` is the engine's closed-world default: no rule declares the
+requested field. Check the field against `covers_fields` in
+`policies/gbo/rules/` first — that, not the grant, is the catalog. A rule that
+names `services` binds only on those FSC services: `ASI0001` covers
 `Query.ingeschrevenPersoon` on `brp`, not on `bri`.
 
-The authorization regime itself no longer travels in the token. It follows
-from the evidence on the request: a consent token selects the consent
-regime, and its absence the PID regime — the two exclude each other by
-construction. So a deny that names a consent or PID axis is about the
-request, not about a missing grant property.
+The authorization regime itself no longer travels in the token. It follows from
+the evidence on the request: a consent token selects the consent regime, and its
+absence the PID regime — the two exclude each other by construction. So a deny
+that names a consent or PID axis is about the request, not about a missing grant
+property.
 
 The bron-sidecar follows the same evidence: with a consent token it puts the
 citizen of that consent in the place of the placeholder, and without one it
-passes the request through. It reads no grant property, and the seeds set
-none. Decode the token to see what the provider Manager actually issued:
+passes the request through. It reads no grant property, and the seeds set none.
+Decode the token to see what the provider Manager actually issued:
 
 ```bash
 docker compose logs --no-log-prefix openftv-pdp | grep -o 'Bearer [A-Za-z0-9._-]*' | tail -1 \
@@ -153,15 +157,14 @@ docker compose logs --no-log-prefix openftv-pdp | grep -o 'Bearer [A-Za-z0-9._-]
 ```
 
 An empty or missing `prp` means the connection contract carries no grant
-properties, which is what the seeds create. A `prp` with `subject_id_type`
-comes from a contract seeded before that property was dropped. It does no
-harm, since nothing reads it. Re-run the seed to clear it: it detects the
-property mismatch, creates a new contract (contracts are immutable) and
-repoints the grant-link.
+properties, which is what the seeds create. A `prp` with `subject_id_type` comes
+from a contract seeded before that property was dropped. It does no harm, since
+nothing reads it. Re-run the seed to clear it: it detects the property mismatch,
+creates a new contract (contracts are immutable) and repoints the grant-link.
 
-Each seed target repairs only its own grants, so repair the whole demo at
-once — the order matters, `fsc-seed-bri-hv` needs the `bri` publication the
-first target creates:
+Each seed target repairs only its own grants, so repair the whole demo at once —
+the order matters, `fsc-seed-bri-hv` needs the `bri` publication the first
+target creates:
 
 ```bash
 make fsc-seed-bri fsc-seed-rvig-source fsc-seed-metadata fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-consent-authorization
@@ -170,21 +173,21 @@ make fsc-seed-bri fsc-seed-rvig-source fsc-seed-metadata fsc-seed-bri-hv fsc-see
 The `svc` claim in the decoded token names the failing service. To repair just
 that one:
 
-| `svc` | Consumer → provider | Seed target |
-| --- | --- | --- |
-| `bri` | EDI-issuer → Belastingdienst | `make fsc-seed-bri` |
-| `bri` | Hypotheekverlener → Belastingdienst | `make fsc-seed-bri-hv` |
-| `brp` | EDI-issuer → Belastingdienst (RvIG source) | `make fsc-seed-rvig-source` |
-| `gbo-metadata-bd`, `gbo-metadata-rvig` | EDI-issuer → Belastingdienst | `make fsc-seed-metadata` |
-| `consent-status` | PDP → Toestemmingsregister | `make fsc-seed-consent-status` |
-| `consent-authorization` | Hypotheekverlener, Installatie Register → Toestemmingsregister | `make fsc-seed-consent-authorization` |
+| `svc`                                  | Consumer → provider                                            | Seed target                           |
+| -------------------------------------- | -------------------------------------------------------------- | ------------------------------------- |
+| `bri`                                  | EDI-issuer → Belastingdienst                                   | `make fsc-seed-bri`                   |
+| `bri`                                  | Hypotheekverlener → Belastingdienst                            | `make fsc-seed-bri-hv`                |
+| `brp`                                  | EDI-issuer → Belastingdienst (RvIG source)                     | `make fsc-seed-rvig-source`           |
+| `gbo-metadata-bd`, `gbo-metadata-rvig` | EDI-issuer → Belastingdienst                                   | `make fsc-seed-metadata`              |
+| `consent-status`                       | PDP → Toestemmingsregister                                     | `make fsc-seed-consent-status`        |
+| `consent-authorization`                | Hypotheekverlener, Installatie Register → Toestemmingsregister | `make fsc-seed-consent-authorization` |
 
 The `sub` claim tells the two `bri` rows apart: `99999999900000000100` is the
 EDI-issuer, `99999999900000000300` the Hypotheekverlener.
 
-If the new contract stays pending, the counterparty refused it; see *Contract
-seed fails* above. Grant properties need OpenFSC >= v2.0.0 on every peer on
-the contract.
+If the new contract stays pending, the counterparty refused it; see _Contract
+seed fails_ above. Grant properties need OpenFSC >= v2.0.0 on every peer on the
+contract.
 
 ## EUDI flow doesn't work after `make demo-eudi`
 
@@ -197,22 +200,22 @@ docker compose ps
 ```
 
 `make demo-eudi` should create three active source records and four offers:
-`inkomensverklaring_2024`, `inkomensverklaring_2025`,
-`akte_van_overlijden`, and `demo_inkomen_2025`. The last offer is the
-explicitly unsecured HTTP demonstration.
+`inkomensverklaring_2024`, `inkomensverklaring_2025`, `akte_van_overlijden`, and
+`demo_inkomen_2025`. The last offer is the explicitly unsecured HTTP
+demonstration.
 
 **The QR opens but no applicable PID can be shared**: `make demo-eudi` does not
 onboard the wallet or issue a PID. Use a v0.5.0-compatible test wallet with a
 trusted `urn:eudi:pid:nl:1` credential. Mock BSN `999991772` is the persona that
-has data for all three offers. Also verify that the wallet trusts the issuer
-and reader CA certificates installed under `.local/secrets/development-ca`.
+has data for all three offers. Also verify that the wallet trusts the issuer and
+reader CA certificates installed under `.local/secrets/development-ca`.
 
 **`make publish-trust-lists` fails with `requires its own GBO root`**: the
 issuer or reader CA files are not the GBO CAs (CN `ca.gbo-issuer` and
 `ca.gbo-reader`). Put the four CA files under `.local/secrets/development-ca/`
-(or `ONBOARDING_SECRETS_DIR`), then run the provisioning again. Published
-wallet builds trust only the managed CAs; a CA of your own works only with a
-wallet you build yourself.
+(or `ONBOARDING_SECRETS_DIR`), then run the provisioning again. Published wallet
+builds trust only the managed CAs; a CA of your own works only with a wallet you
+build yourself.
 
 **`source metadata unavailable`**: reconciliation did not produce a usable
 activation. Rerun the complete idempotent sequence and inspect the reconciler
@@ -225,12 +228,12 @@ docker compose --profile eudi up --build --force-recreate -d \
   eudi-adapter eudi-issuance-server developer-portal landing-page
 ```
 
-**The wallet fails after PID sharing and the issuance-server logs `requested
-credential previews not found in session`**: compare the public and local
-issuer metadata. With Cloudflare, `CF-Cache-Status: HIT` or an `Age` header on
-the issuance hostname means a broad cache rule is overriding the origin's
-`Cache-Control: no-store`. Add a final hostname-wide **Bypass cache** rule,
-purge the hostname, reload the QR page, and scan a newly generated QR.
+**The wallet fails after PID sharing and the issuance-server logs
+`requested credential previews not found in session`**: compare the public and
+local issuer metadata. With Cloudflare, `CF-Cache-Status: HIT` or an `Age`
+header on the issuance hostname means a broad cache rule is overriding the
+origin's `Cache-Control: no-store`. Add a final hostname-wide **Bypass cache**
+rule, purge the hostname, reload the QR page, and scan a newly generated QR.
 
 ```bash
 set -a; . ./.env; set +a
@@ -247,11 +250,16 @@ the active source record.
 [Contract seed fails](#contract-seed-fails). Do not wipe a non-disposable
 environment.
 
-**Check**: `curl -X POST 'http://localhost:9409/attestations/99999999900000000200/inkomensverklaring?jaar=2024' …`. A `UNKNOWN_GRANT_HASH_IN_HEADER` response means the data-service grant-link is missing.
+**Check**:
+`curl -X POST 'http://localhost:9409/attestations/99999999900000000200/inkomensverklaring?jaar=2024' …`.
+A `UNKNOWN_GRANT_HASH_IN_HEADER` response means the data-service grant-link is
+missing.
 
 ## Developer portal shows empty tabs
 
-Expected with `make demo-minimal` (base only) and `make demo-eudi`: DvTP tabs are empty because `dienstverlener-backend` + `consent-portal-backend` are not running. Use `make demo-full` or `make demo` to bring them up.
+Expected with `make demo-minimal` (base only) and `make demo-eudi`: DvTP tabs
+are empty because `dienstverlener-backend` + `consent-portal-backend` are not
+running. Use `make demo-full` or `make demo` to bring them up.
 
 ## Reset to a clean state
 

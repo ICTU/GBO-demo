@@ -3,18 +3,18 @@
 This repository is a runnable reference demo for GBO. It shows how a consumer
 can request data from a source, normally over OpenFSC with every request
 evaluated by an OpenFTV policy before the source returns data. The EUDI demo
-also contains one deliberately unsecured HTTP source to prove that onboarding
-is not technically coupled to FSC; that source is not a security example.
+also contains one deliberately unsecured HTTP source to prove that onboarding is
+not technically coupled to FSC; that source is not a security example.
 
-The unsecured source is mounted only by the local Compose setup and is not
-part of the deployable source configuration used by simulation environments.
+The unsecured source is mounted only by the local Compose setup and is not part
+of the deployable source configuration used by simulation environments.
 
 The demo contains two ways to start that request:
 
 - **DvTP consent** — a citizen grants a consumer permission to request a
   specific data scope.
-- **EUDI wallet issuance** — a citizen shares a PID from a wallet and receives
-  a source-backed credential.
+- **EUDI wallet issuance** — a citizen shares a PID from a wallet and receives a
+  source-backed credential.
 
 The production-oriented flows use the same core path:
 
@@ -26,21 +26,20 @@ consumer → FSC Outway → FSC Inway → OpenFTV PDP → source sidecar → Gra
 
 For every mode:
 
-- Docker Engine 25 or newer with the Compose plugin
-  (Docker API 1.44; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#healthcheckstart_interval-requires-docker-engine-v25));
+- Docker Engine 25 or newer with the Compose plugin (Docker API 1.44; see
+  [TROUBLESHOOTING.md](TROUBLESHOOTING.md#healthcheckstart_interval-requires-docker-engine-v25));
 - Git, Make, Bash, `curl`, `jq`, OpenSSL and Python 3.9 or newer;
 - a local `.env` copied from `.env.example`;
 - non-empty `FTV_POSTGRES_PASSWORD`, `FTV_ADL_READER_PASSWORD`,
-  `EUDI_POSTGRES_PASSWORD`,
-  `SOURCE_REGISTRY_PASSWORD` and `SOURCE_REGISTRY_READER_PASSWORD` values in
-  `.env`.
+  `EUDI_POSTGRES_PASSWORD`, `SOURCE_REGISTRY_PASSWORD` and
+  `SOURCE_REGISTRY_READER_PASSWORD` values in `.env`.
 
 The complete EUDI flow additionally requires:
 
 - the pinned nl-wallet v0.5.0 submodule;
 - Go 1.26 or newer on the host: the provisioning targets (`demo-eudi`,
-  `demo-full` and every `provision-*` target) sign with `go run` on the host,
-  so the CA keys never enter a container;
+  `demo-full` and every `provision-*` target) sign with `go run` on the host, so
+  the CA keys never enter a container;
 - two public HTTPS URLs: one for the issuance server and one for the EUDI
   adapter (the own credential issuer and the ASI route need more; see
   [the port table](#public-urls-and-ports));
@@ -82,27 +81,27 @@ make demo
 
 The first run builds every image and takes a few minutes. Open the demo at:
 
-| Entry point | URL |
-| --- | --- |
+| Entry point       | URL                     |
+| ----------------- | ----------------------- |
 | Demo landing page | <http://localhost:9000> |
-| Consumer mock | <http://localhost:9001> |
-| Consent portal | <http://localhost:9002> |
-| Developer portal | <http://localhost:9003> |
-| Jaeger (traces) | <http://localhost:9686> |
+| Consumer mock     | <http://localhost:9001> |
+| Consent portal    | <http://localhost:9002> |
+| Developer portal  | <http://localhost:9003> |
+| Jaeger (traces)   | <http://localhost:9686> |
 
 Then follow the [DvTP consent walkthrough](#dvtp-consent).
 
-To open the demo from another machine, set `GBO_PUBLIC_HOST` in `.env` to
-the IP address or DNS name that browser uses and run `make demo` again.
+To open the demo from another machine, set `GBO_PUBLIC_HOST` in `.env` to the IP
+address or DNS name that browser uses and run `make demo` again.
 
 ### HTTPS behind a reverse proxy
 
 Off localhost, some pages need https: the OpenFTV Manager login and the
 reference QTSP. Put a TLS-terminating reverse proxy (for example
-`tailscale serve` or Caddy) in front of each port the browser opens, on the
-same port number, forwarding to `http://127.0.0.1:<port>`. It must pass
-WebSocket upgrades and `X-Forwarded-*` headers. Then set in `.env` and run
-`make demo` again:
+`tailscale serve` or Caddy) in front of each port the browser opens, on the same
+port number, forwarding to `http://127.0.0.1:<port>`. It must pass WebSocket
+upgrades and `X-Forwarded-*` headers. Then set in `.env` and run `make demo`
+again:
 
 ```dotenv
 GBO_PUBLIC_HOST=demo.example.org
@@ -110,8 +109,8 @@ GBO_PUBLIC_SCHEME=https
 GBO_PUBLIC_BIND_ADDRESS=127.0.0.1
 ```
 
-`GBO_PUBLIC_BIND_ADDRESS` keeps the plain http ports on the loopback
-interface, so only the proxy reaches them.
+`GBO_PUBLIC_BIND_ADDRESS` keeps the plain http ports on the loopback interface,
+so only the proxy reaches them.
 
 For the EUDI flows some containers call the public URLs themselves
 (`EUDI_BRI_URL` and `EUDI_TRUST_PUBLIC_URL`), so those hostnames must also
@@ -130,32 +129,31 @@ EUDI_BRI_URL=https://eudi-bri.example.org/
 
 #### Public URLs and ports
 
-Each public URL routes to one published host port. `make demo-full` needs
-the first two; the others serve the
-[own credential issuer](#own-credential-issuer-for-eudi-wallets) and the
-ASI route (`make demo-asi`). Set the ones you use in `.env`.
+Each public URL routes to one published host port. `make demo-full` needs the
+first two; the others serve the
+[own credential issuer](#own-credential-issuer-for-eudi-wallets) and the ASI
+route (`make demo-asi`). Set the ones you use in `.env`.
 
-| Setting | Host port | Needed for |
-| --- | --- | --- |
-| `EUDI_PUBLIC_URL` | 18001 | NL Wallet issuance (issuance server) |
-| `EUDI_BRI_URL` | 9409 | EUDI adapter: the issuance server's data source and type metadata |
-| `ISSUER_PUBLIC_URL` | 9429 | own credential issuer |
-| `EUDI_TRUST_PUBLIC_URL` | 9430 | trust host: LoTE lists, CRL, status lists |
-| `ASI_PROVIDER_PUBLIC_URL` | 9424 | ASI provider |
-| `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` | 9425 | ASI login and consent in the browser |
-| `QTSP_PUBLIC_URL` | 9427 | reference QTSP |
-| `ASI_WALLET_VERIFIER_PUBLIC_URL` | 9428 | NL Wallet PID presentation in the ASI route |
-| `ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL` | 9432 | EUDI wallet PID presentation in the ASI route |
-| `GBO_PUBLIC_HOST` | 9000, 9003 | landing page, developer portal |
+| Setting                               | Host port  | Needed for                                                        |
+| ------------------------------------- | ---------- | ----------------------------------------------------------------- |
+| `EUDI_PUBLIC_URL`                     | 18001      | NL Wallet issuance (issuance server)                              |
+| `EUDI_BRI_URL`                        | 9409       | EUDI adapter: the issuance server's data source and type metadata |
+| `ISSUER_PUBLIC_URL`                   | 9429       | own credential issuer                                             |
+| `EUDI_TRUST_PUBLIC_URL`               | 9430       | trust host: LoTE lists, CRL, status lists                         |
+| `ASI_PROVIDER_PUBLIC_URL`             | 9424       | ASI provider                                                      |
+| `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` | 9425       | ASI login and consent in the browser                              |
+| `QTSP_PUBLIC_URL`                     | 9427       | reference QTSP                                                    |
+| `ASI_WALLET_VERIFIER_PUBLIC_URL`      | 9428       | NL Wallet PID presentation in the ASI route                       |
+| `ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL` | 9432       | EUDI wallet PID presentation in the ASI route                     |
+| `GBO_PUBLIC_HOST`                     | 9000, 9003 | landing page, developer portal                                    |
 
-Never publish port 9431: it is the own issuer's internal offer API, which
-has no authentication. Compose binds it to `127.0.0.1`; keep it out of the
-proxy too.
+Never publish port 9431: it is the own issuer's internal offer API, which has no
+authentication. Compose binds it to `127.0.0.1`; keep it out of the proxy too.
 
-Before starting an EUDI demo, provide the issuer and reader CA material that
-the test wallet already trusts. The setup deliberately never generates trust
-anchors, apart from the registrar root described below, which it creates only
-on request. By default it loads these four files from
+Before starting an EUDI demo, provide the issuer and reader CA material that the
+test wallet already trusts. The setup deliberately never generates trust
+anchors, apart from the registrar root described below, which it creates only on
+request. By default it loads these four files from
 `.local/secrets/development-ca/`:
 
 ```text
@@ -165,9 +163,9 @@ reader-ca-key.pem
 reader-ca-cert.pem
 ```
 
-These files are managed material and are not part of the repository.
-Published wallet builds trust only these managed CAs; a CA of your own works
-only with a wallet you build yourself against your own trust lists.
+These files are managed material and are not part of the repository. Published
+wallet builds trust only these managed CAs; a CA of your own works only with a
+wallet you build yourself against your own trust lists.
 
 Keep the private keys outside version control. To load the same managed CA
 material from another location, set `ONBOARDING_SECRETS_DIR` to the absolute
@@ -175,82 +173,80 @@ path of that secrets root; both the provisioning command and Compose use it.
 Setup fails before onboarding when any required CA file is absent.
 
 Those CA private keys are provisioning input, not application runtime input.
-After the issuer, reader and status leaf certificates have been provisioned,
-the source reconciler receives only their public certificates and the two
-public CA certificates. Leaf private keys are mounted exclusively into the
-issuance materializer. A Kubernetes runtime Secret must not contain
-`issuer-ca-key.pem` or `reader-ca-key.pem`.
+After the issuer, reader and status leaf certificates have been provisioned, the
+source reconciler receives only their public certificates and the two public CA
+certificates. Leaf private keys are mounted exclusively into the issuance
+materializer. A Kubernetes runtime Secret must not contain `issuer-ca-key.pem`
+or `reader-ca-key.pem`.
 
-The [GBO trust lists](docs/gbo-trust-lists.md) combine NL pre-production
-anchors with the GBO roots in four role-specific LoTE files. The temporary
-demo mode trusts the fixed official HTTPS source; configuring its public key
-enables mandatory JWT signature verification. Internal PID consumers verify
-our signed list against the independently provisioned LoTE root; the Go
-services refresh on use hourly, and the upstream NL verifier uses a verified
-provisioning snapshot plus restart.
-See the [trust-host runbook](trust-host/README.md) for host-only signing and
-publication.
+The [GBO trust lists](docs/gbo-trust-lists.md) combine NL pre-production anchors
+with the GBO roots in four role-specific LoTE files. The temporary demo mode
+trusts the fixed official HTTPS source; configuring its public key enables
+mandatory JWT signature verification. Internal PID consumers verify our signed
+list against the independently provisioned LoTE root; the Go services refresh on
+use hourly, and the upstream NL verifier uses a verified provisioning snapshot
+plus restart. See the [trust-host runbook](trust-host/README.md) for host-only
+signing and publication.
 
-The own credential issuer (`services/eudi-credential-issuer`, Compose
-profile `credential-issuer`, started with `make credential-issuer-up`; see
-[below](#own-credential-issuer-for-eudi-wallets)) also needs per source an access certificate (WRPAC) and a registration
-certificate (WRPRC). `make create-development-registrar-root` creates the
-registrar root that signs the registration certificates, once, in
-`development-ca/` (`registrar-ca-key.pem`, `registrar-ca-cert.pem`); it is a
-trust anchor of its own and is never replaced. Its certificate is copied to
+The own credential issuer (`services/eudi-credential-issuer`, Compose profile
+`credential-issuer`, started with `make credential-issuer-up`; see
+[below](#own-credential-issuer-for-eudi-wallets)) also needs per source an
+access certificate (WRPAC) and a registration certificate (WRPRC).
+`make create-development-registrar-root` creates the registrar root that signs
+the registration certificates, once, in `development-ca/`
+(`registrar-ca-key.pem`, `registrar-ca-cert.pem`); it is a trust anchor of its
+own and is never replaced. Its certificate is copied to
 `.local/public-certificates/development-ca/` for the wallets' trust lists.
-`make provision-wallet-registration SOURCE_ID=<source_id>` then issues the
-WRPAC under the reader root and the WRPRC for the types of the active Source
-Release, creates the source's key for encrypted credential requests once
-(`request-encryption-key.pem`, kept on later runs), and writes the reader-root CRL and the WRPRC status list to
-`.local/public-trust/` for the trust host. A container reads the source from
-the Source Registry; the signing runs on the host, so the CA keys never enter
-a container. It needs `EUDI_TRUST_PUBLIC_URL`
+`make provision-wallet-registration SOURCE_ID=<source_id>` then issues the WRPAC
+under the reader root and the WRPRC for the types of the active Source Release,
+creates the source's key for encrypted credential requests once
+(`request-encryption-key.pem`, kept on later runs), and writes the reader-root
+CRL and the WRPRC status list to `.local/public-trust/` for the trust host. A
+container reads the source from the Source Registry; the signing runs on the
+host, so the CA keys never enter a container. It needs `EUDI_TRUST_PUBLIC_URL`
 (the public root URL of that host, which goes into the certificates) and, the
 first time for a source, `KVK_NUMBER`: the organizationIdentifier in the WRPAC
 and the WRPRC is `NTRNL-<KvK number>`, because ETSI EN 319 412-1 section 5.1.4
 defines no identity type for an OIN. The number is recorded per source; a
-different one for a registered source is refused. The demo sources use
-fictional numbers: `99990200` for `belastingdienst`, `99990300` for `rvig` and
-`99990900` for `demo-unsecured`. The CRL and the status list are valid for a year
-at most and never outlive the reader root (the pre-provisioned one expires on
+different one for a registered source is refused. The demo sources use fictional
+numbers: `99990200` for `belastingdienst`, `99990300` for `rvig` and `99990900`
+for `demo-unsecured`. The CRL and the status list are valid for a year at most
+and never outlive the reader root (the pre-provisioned one expires on
 2027-04-30); nothing renews them, and revocation is not supported: every run
 publishes both afresh. The trust URL is recorded in
 `development-ca/wallet-registration.json`; to change it, remove that file and
 provision every source again.
 
-For disclosure-based issuance (the wallet discloses the BSN from its PID,
-then gets the offer), the same command also issues a WRPRC for the source as
-a relying party (`wrprc-verifier.jwt`): entitlement `Service_Provider`,
-authorizing the `bsn` of `urn:eudi:pid:nl:1`, with the purpose the wallet
-shows and a status entry of its own. Run it again for sources provisioned
-before, and `make provision-test-pid` too (it now also puts the test PID
-root next to its registration); the materializer refuses a source without
-them. It turns every offer
-of the source's activated types into a disclosure offer under the same id,
+For disclosure-based issuance (the wallet discloses the BSN from its PID, then
+gets the offer), the same command also issues a WRPRC for the source as a
+relying party (`wrprc-verifier.jwt`): entitlement `Service_Provider`,
+authorizing the `bsn` of `urn:eudi:pid:nl:1`, with the purpose the wallet shows
+and a status entry of its own. Run it again for sources provisioned before, and
+`make provision-test-pid` too (it now also puts the test PID root next to its
+registration); the materializer refuses a source without them. It turns every
+offer of the source's activated types into a disclosure offer under the same id,
 and trusts the PIDs of the NL PID issuer CAs in `PID_TRUST_ANCHORS_FILE`
 (default: the pre-production CA in
-`services/asi-wallet-verifier/pid-issuer-anchors.txt`) and, once
-provisioned, of the test PID.
+`services/asi-wallet-verifier/pid-issuer-anchors.txt`) and, once provisioned, of
+the test PID.
 
-`make provision-qtsp-wallet-registration` registers the reference QTSP as
-a provider of the own issuer, after `make
-provision-qtsp-issuance-certificates`: a WRPAC and a WRPRC with the
-`QEAA_Provider` entitlement for its test statement (fictional KvK number
-`99991300`, not a public body). The materializer then adds the QTSP, with
-its statement valid for 30 days and its internal HTTPS callback as
-bronpoort, trusted through the development issuer CA that signs the
-callback's certificate; without the registration it leaves the QTSP out.
-Next to `nl` and `eudi` the issuer then also has the combined profile
-`wallet`, under which one offer serves both wallets; the NL Wallet joins it
-once its wallet providers are mounted.
+`make provision-qtsp-wallet-registration` registers the reference QTSP as a
+provider of the own issuer, after `make provision-qtsp-issuance-certificates`: a
+WRPAC and a WRPRC with the `QEAA_Provider` entitlement for its test statement
+(fictional KvK number `99991300`, not a public body). The materializer then adds
+the QTSP, with its statement valid for 30 days and its internal HTTPS callback
+as bronpoort, trusted through the development issuer CA that signs the
+callback's certificate; without the registration it leaves the QTSP out. Next to
+`nl` and `eudi` the issuer then also has the combined profile `wallet`, under
+which one offer serves both wallets; the NL Wallet joins it once its wallet
+providers are mounted.
 
-`make provision-test-pid` adds a test PID provider to the own issuer: a PID
-of the NL type (`urn:eudi:pid:nl:1`) for wallets without a real one, such as
-the EUDI reference wallet, so the disclosure-based route can be shown with
-them. Its credentials chain to a development root of its own
-(`.local/test-pid-root/`, outside every container mount, created once, its
-certificate copied to `.local/public-certificates/development-ca/`), which only the demo's wallet
+`make provision-test-pid` adds a test PID provider to the own issuer: a PID of
+the NL type (`urn:eudi:pid:nl:1`) for wallets without a real one, such as the
+EUDI reference wallet, so the disclosure-based route can be shown with them. Its
+credentials chain to a development root of its own (`.local/test-pid-root/`,
+outside every container mount, created once, its certificate copied to
+`.local/public-certificates/development-ca/`), which only the demo's wallet
 builds and verifier trust. It is registered like a source, with the
 `PID_Provider` entitlement and the fictional KvK number `99990100`, and fed by
 `test-pid-source` from the BRP mock persons. It is a test fixture, not a PID
@@ -258,8 +254,8 @@ Provider.
 
 `EUDI_PUBLIC_URL` must route to the issuance server and its hostname must be in
 the reader-certificate DNS SAN. `EUDI_BRI_URL` must route to the EUDI adapter.
-See [source onboarding](docs/source-onboarding.md) for the local certificate
-and activation model.
+See [source onboarding](docs/source-onboarding.md) for the local certificate and
+activation model.
 
 With an existing reverse proxy or externally managed tunnel, start everything
 with:
@@ -268,8 +264,8 @@ with:
 make demo-full
 ```
 
-To use the bundled Cloudflare connector, also set
-`CLOUDFLARE_TUNNEL_TOKEN` and run:
+To use the bundled Cloudflare connector, also set `CLOUDFLARE_TUNNEL_TOKEN` and
+run:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.cloudflare-tunnel.yml make demo-full
@@ -277,10 +273,10 @@ COMPOSE_FILE=docker-compose.yml:docker-compose.cloudflare-tunnel.yml make demo-f
 
 Configure these Cloudflare Public Hostnames:
 
-| Public hostname | Tunnel service |
-| --- | --- |
+| Public hostname             | Tunnel service                      |
+| --------------------------- | ----------------------------------- |
 | Host from `EUDI_PUBLIC_URL` | `http://eudi-issuance-server:18001` |
-| Host from `EUDI_BRI_URL` | `http://eudi-adapter:4009` |
+| Host from `EUDI_BRI_URL`    | `http://eudi-adapter:4009`          |
 
 Add a final hostname-wide **Bypass cache** rule for `EUDI_PUBLIC_URL` and purge
 that hostname once. Issuer metadata and QR sessions must not be cached.
@@ -293,10 +289,9 @@ development certificates, EUDI configuration and application startup.
 
 The own credential issuer runs beside the issuance server, under the Compose
 profile `credential-issuer`. It needs `ISSUER_PUBLIC_URL`,
-`EUDI_TRUST_PUBLIC_URL` and `CREDENTIAL_ISSUER_DB_PASSWORD` in `.env`, and
-the trusted wallet providers in `WALLET_ROOTS_DIR` (see the
-credential-issuer block in `docker-compose.yml`). After `make demo-full`,
-run in this order:
+`EUDI_TRUST_PUBLIC_URL` and `CREDENTIAL_ISSUER_DB_PASSWORD` in `.env`, and the
+trusted wallet providers in `WALLET_ROOTS_DIR` (see the credential-issuer block
+in `docker-compose.yml`). After `make demo-full`, run in this order:
 
 ```bash
 # The registrar root is created once and never replaced; skip it on a rerun.
@@ -316,22 +311,22 @@ make provision-asi-eudi-wallet-verifier
 make demo-asi
 ```
 
-The trust host must serve the lists before the issuer starts: its
-materializer and the EUDI wallet verifier fetch the PID list from it. The
-LoTE signer keys stay in `.local/lote-signer/` (`GBO_LOTE_SIGNER_DIR`); losing
-them invalidates every wallet build that embeds their root. See the
+The trust host must serve the lists before the issuer starts: its materializer
+and the EUDI wallet verifier fetch the PID list from it. The LoTE signer keys
+stay in `.local/lote-signer/` (`GBO_LOTE_SIGNER_DIR`); losing them invalidates
+every wallet build that embeds their root. See the
 [trust-host runbook](trust-host/README.md) for the publication details.
 
 ## Other modes
 
-| Command | Starts |
-| --- | --- |
-| `make demo-minimal` | Core services and observability only |
-| `make demo` | DvTP consent flow over OpenFSC |
-| `make demo-eudi` | EUDI wallet flow over OpenFSC |
-| `make demo-full` | DvTP and EUDI flows together |
+| Command             | Starts                                                 |
+| ------------------- | ------------------------------------------------------ |
+| `make demo-minimal` | Core services and observability only                   |
+| `make demo`         | DvTP consent flow over OpenFSC                         |
+| `make demo-eudi`    | EUDI wallet flow over OpenFSC                          |
+| `make demo-full`    | DvTP and EUDI flows together                           |
 | `make demo-manager` | Core services with OpenFTV Manager policy distribution |
-| `make demo-down` | Stops the application and FSC stacks |
+| `make demo-down`    | Stops the application and FSC stacks                   |
 
 `make demo-manager` needs the additional variables documented in
 [its component README](services/openftv-manager-ui/README.md). Prefer the
@@ -345,45 +340,42 @@ contracts and generated configuration in the required order.
 The flow starts at the consumer, not at the consent portal: the portal only
 shows consents that already exist.
 
-1. Open the [consumer mock](http://localhost:9001) and click
-   **Inloggen met DigiD**. The consumer's backend pushes its request (service
-   `aangiftegegevens`, the scopes `bd:ib:2025` and `bd:ib:2024`) to the
-   consent portal over FSC, and the browser goes to the portal with only the
-   consumer's `client_id` and a `request_uri`.
-2. Pick any sign-in method. The DigiD mock takes any username and a mock BSN
-   as the password, for example `123456789`; the mock citizens are in
+1. Open the [consumer mock](http://localhost:9001) and click **Inloggen met
+   DigiD**. The consumer's backend pushes its request (service
+   `aangiftegegevens`, the scopes `bd:ib:2025` and `bd:ib:2024`) to the consent
+   portal over FSC, and the browser goes to the portal with only the consumer's
+   `client_id` and a `request_uri`.
+2. Pick any sign-in method. The DigiD mock takes any username and a mock BSN as
+   the password, for example `123456789`; the mock citizens are in
    `services/graphql-server/mockdata/citizens.json`.
-3. The portal shows the consumer's registered name and purpose. Choose the
-   data sets to share and click **Geef toestemming**. After a short
-   confirmation the portal sends you back to the consumer mock with a
-   one-time code; the consumer's backend exchanges it over FSC for the signed
-   consent token, keeps the token in its session and runs the query. Expand
-   **Inkomensgegevens** to see the income data, the **↻ Verversen** button and
-   the trace-id.
+3. The portal shows the consumer's registered name and purpose. Choose the data
+   sets to share and click **Geef toestemming**. After a short confirmation the
+   portal sends you back to the consumer mock with a one-time code; the
+   consumer's backend exchanges it over FSC for the signed consent token, keeps
+   the token in its session and runs the query. Expand **Inkomensgegevens** to
+   see the income data, the **↻ Verversen** button and the trace-id.
 4. Open the [developer portal](http://localhost:9003). **History · Replay**
    lists the issuance and the query with their outcome and trace id.
-5. In another tab, open the [consent portal](http://localhost:9002) and sign
-   in as the same citizen. Open the consent: **Gebruik** lists one use with
-   today's date, the service provider and Belastingdienst as the source. Each
-   **↻ Verversen** in the consumer mock is a new trace and adds a use. The
-   source's sidecar registers each delivery at the data usage index and
-   records it in a delivery logbook of its own before it returns the data,
-   and the register reads each use back from that logbook over FSC; see
+5. In another tab, open the [consent portal](http://localhost:9002) and sign in
+   as the same citizen. Open the consent: **Gebruik** lists one use with today's
+   date, the service provider and Belastingdienst as the source. Each **↻
+   Verversen** in the consumer mock is a new trace and adds a use. The source's
+   sidecar registers each delivery at the data usage index and records it in a
+   delivery logbook of its own before it returns the data, and the register
+   reads each use back from that logbook over FSC; see
    [docs/consent-flow.md](docs/consent-flow.md#4-gebruik-van-een-toestemming-inzien).
-6. On the same page click **Toestemming intrekken**.
-   Back in the consumer mock, expand **Inkomensgegevens** and click
-   **↻ Verversen** to repeat the query with the same consent. The PDP now denies
-   it. The consumer is told only `FIELD_NOT_PERMITTED`, so the consumer mock
-   offers to consent again without naming a cause. The developer portal's
-   history lists the request as `DENY`; the field's own reason,
-   `CONSENT_WITHDRAWN`, is in the PDP decision log
+6. On the same page click **Toestemming intrekken**. Back in the consumer mock,
+   expand **Inkomensgegevens** and click **↻ Verversen** to repeat the query
+   with the same consent. The PDP now denies it. The consumer is told only
+   `FIELD_NOT_PERMITTED`, so the consumer mock offers to consent again without
+   naming a cause. The developer portal's history lists the request as `DENY`;
+   the field's own reason, `CONSENT_WITHDRAWN`, is in the PDP decision log
    (`docker compose logs openftv-pdp`).
 
-Starting again from the consumer mock's home page begins a new consent
-request.
+Starting again from the consumer mock's home page begins a new consent request.
 
-The [Installatie Register mock](http://localhost:9004) asks the owner's
-consent for the ownership check at LVG the same way: **Bevestig eigendom via
+The [Installatie Register mock](http://localhost:9004) asks the owner's consent
+for the ownership check at LVG the same way: **Bevestig eigendom via
 MijnOverheid** pushes the request through `ir-backend`, and the return page
 hands the code to that backend, which keeps the token for the checks at LVG.
 
@@ -396,8 +388,8 @@ issuance payloads and user-saved scenarios keep the value entered by the user.
 See [the DvTP consent architecture and sequence diagrams](docs/consent-flow.md)
 for the component boundaries and the grant, use and revocation flows.
 
-A service provider can also query through an integrator: a processor with an
-FSC peer of its own that connects on the provider's behalf over a delegated
+A service provider can also query through an integrator: a processor with an FSC
+peer of its own that connects on the provider's behalf over a delegated
 connection. The consent then binds the provider, the FSC delegator, and the
 integrator needs a mandate in the DvTP onboarding register. The demo uses the
 direct path by default; `make demo-integrator` adds the integrator to a running
@@ -411,32 +403,32 @@ FSC consumer peer of its own (...1200). `make demo-asi` adds it to a running
 (`services/asi-discovery-stub`) finds its data services per attribute, and a
 reference QTSP (`services/qtsp-reference`, http://localhost:9427) is where a
 user starts. The developer portal's ASI tab lays a request down at that QTSP,
-with scenarios for each verification result, and shows the outcome next to
-the chain. After a successful result, the QTSP offers a clearly marked,
+with scenarios for each verification result, and shows the outcome next to the
+chain. After a successful result, the QTSP offers a clearly marked,
 non-qualified test statement to the same citizen's NL Wallet. The existing
 central issuance server uses a separate QTSP usecase and certificate set and
 fetches the pending statement over internal HTTPS. See
 [services/asi-provider/README.md](services/asi-provider/README.md), and
-[docs/asi-route.md](docs/asi-route.md) for what in this route is real,
-stubbed or a GBO interpretation.
+[docs/asi-route.md](docs/asi-route.md) for what in this route is real, stubbed
+or a GBO interpretation.
 
 `S01` is the architecture role identifier used in the demo diagrams for the
 consent-register; it is not a separate service. The demo consent token is a
 bearer JWT. The consent-register keeps consents in memory with
 `CONSENT_STORE=memory` (the compose demo) and in PostgreSQL with
-`CONSENT_STORE=postgres` and `DATABASE_URL`; without `CONSENT_STORE` it
-uses PostgreSQL when `DATABASE_URL` is set. It generates an ephemeral P-256
-key when `CONSENT_SIGNING_KEY_PATH` is empty, which only the in-memory store
-allows. A persistent deployment must provide a stable PKCS#8 or SEC1 P-256
-private key. The key ID is `CONSENT_SIGNING_KEY_ID` when set, else the key's
-RFC 7638 JWK thumbprint, so a new key always gets a new key ID and the PDP
-fetches the JWKS again instead of verifying with a cached old key. The demo JWKS
-exposes only the current key; production rotation must retain old public keys
-until their tokens expire. Production hardening should also shorten the token
-lifetime and bind proof of possession
-to the FSC/mTLS identity (for example with a confirmation claim); the current
-explicit `dienstverlener_oin` check prevents cross-consumer use but does not
-make a stolen bearer token non-replayable by that same consumer.
+`CONSENT_STORE=postgres` and `DATABASE_URL`; without `CONSENT_STORE` it uses
+PostgreSQL when `DATABASE_URL` is set. It generates an ephemeral P-256 key when
+`CONSENT_SIGNING_KEY_PATH` is empty, which only the in-memory store allows. A
+persistent deployment must provide a stable PKCS#8 or SEC1 P-256 private key.
+The key ID is `CONSENT_SIGNING_KEY_ID` when set, else the key's RFC 7638 JWK
+thumbprint, so a new key always gets a new key ID and the PDP fetches the JWKS
+again instead of verifying with a cached old key. The demo JWKS exposes only the
+current key; production rotation must retain old public keys until their tokens
+expire. Production hardening should also shorten the token lifetime and bind
+proof of possession to the FSC/mTLS identity (for example with a confirmation
+claim); the current explicit `dienstverlener_oin` check prevents cross-consumer
+use but does not make a stolen bearer token non-replayable by that same
+consumer.
 
 The DvTP onboarding register also reads `DIENSTVERLENER_PUBLIC_URL` and
 `KEYPER_PUBLIC_URL` to build the registered return locations of both demo
@@ -449,11 +441,11 @@ both demo providers reach through their Outway at `/consent-authorization`
 (`make fsc-seed-consent-authorization`, part of `make demo`). The request
 carries `response_type=code`, `client_id` (the provider's own Peer ID),
 `service`, `scope` (space-separated data sets), `redirect_uri`, `state` and an
-S256 `code_challenge`; `valid_until`, `client_name` and `purpose` are
-optional. The portal checks it against the provider's registration in the
-DvTP onboarding register and answers `201` with a `request_uri` and
-`expires_in` (`PAR_REQUEST_LIFETIME`, default 10 minutes), or refuses it with
-an OAuth error and the reason code in `reason`.
+S256 `code_challenge`; `valid_until`, `client_name` and `purpose` are optional.
+The portal checks it against the provider's registration in the DvTP onboarding
+register and answers `201` with a `request_uri` and `expires_in`
+(`PAR_REQUEST_LIFETIME`, default 10 minutes), or refuses it with an OAuth error
+and the reason code in `reason`.
 
 The provider then sends the citizen's browser to the portal with only its
 `client_id` and the `request_uri`. Behind the portal login,
@@ -479,9 +471,10 @@ cookie while the citizen logs in, shows the resolved request with "Geef
 toestemming" and "Weiger", and after a short confirmation goes to the return URL
 in the backend's answer. A refused reference, or a start cookie that expired
 during the login, shows an error page without a link or a redirect. The portal
-cannot be framed by another site. Both demo providers use this flow; the
-portal no longer accepts a request in the URL, and the consent token never
-passes through the browser. See [the reason codes and outcomes](docs/consent-flow.md#weigeringen-en-uitkomsten)
+cannot be framed by another site. Both demo providers use this flow; the portal
+no longer accepts a request in the URL, and the consent token never passes
+through the browser. See
+[the reason codes and outcomes](docs/consent-flow.md#weigeringen-en-uitkomsten)
 and the demo shortcuts of this flow in the consent-flow document.
 
 ### EUDI wallet issuance
@@ -504,25 +497,25 @@ issuance server or changing activated source metadata.
 The DvTP and FSC-backed EUDI entrypoints share transport, policy evaluation,
 identifier resolution and source access. Belastingdienst and BRP/RvIG are
 separate logical sources with their own metadata, data services, policies and
-certificate sets; this demo publishes both through one FSC participant. The
-EUDI adapter contains no hard-coded source or offer catalog: active source
-metadata generates the issuance-server products and the frontend offer list.
+certificate sets; this demo publishes both through one FSC participant. The EUDI
+adapter contains no hard-coded source or offer catalog: active source metadata
+generates the issuance-server products and the frontend offer list.
 
 The demo combines production-grade components with deliberate test doubles:
 
-| Area | In this repository |
-| --- | --- |
-| Transport | OpenFSC managers, controllers, Inways and Outways |
-| Authorization | OpenFTV v0.1.0 PDP with OPA/Rego policies |
-| Source access | Go GraphQL services behind source-side sidecars |
-| Observability | OpenTelemetry, Jaeger, Loki and Grafana |
-| Processing logs | `ldv-logboek` per Verantwoordelijke — Belastingdienst, RvIG and GBO (LDV v1.0.0), alongside the PDP's ADL and FSC-Logging |
-| Identity and data | Synthetic citizens, deterministic BSNk and mock DigiD |
-| Consent | In-memory demo register |
+| Area              | In this repository                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Transport         | OpenFSC managers, controllers, Inways and Outways                                                                         |
+| Authorization     | OpenFTV v0.1.0 PDP with OPA/Rego policies                                                                                 |
+| Source access     | Go GraphQL services behind source-side sidecars                                                                           |
+| Observability     | OpenTelemetry, Jaeger, Loki and Grafana                                                                                   |
+| Processing logs   | `ldv-logboek` per Verantwoordelijke — Belastingdienst, RvIG and GBO (LDV v1.0.0), alongside the PDP's ADL and FSC-Logging |
+| Identity and data | Synthetic citizens, deterministic BSNk and mock DigiD                                                                     |
+| Consent           | In-memory demo register                                                                                                   |
 
-This is a reference architecture, not a production-ready deployment. In the
-EUDI demo, the disclosed subject is not yet independently cryptographically
-bound to the selected source record before policy evaluation. See
+This is a reference architecture, not a production-ready deployment. In the EUDI
+demo, the disclosed subject is not yet independently cryptographically bound to
+the selected source record before policy evaluation. See
 [SECURITY.md](SECURITY.md) for the security boundary and known limitations.
 
 ### What a denial tells the citizen
@@ -532,28 +525,28 @@ FTV GraphQL profile: it says that the request was refused, never why or which
 field. The reason per field stays with the PDP and the developer portal.
 
 The disclosure decision sits in one place, on the server:
-`services/dienstverlener-backend/consumer/denial.go` maps the upstream reason onto a
-`denial_code`. Only `FIELD_NOT_PERMITTED` passes through — a refused field is
-the one denial the citizen can act on, by giving consent again. Everything
-else, including `ACCESS_DENIED`, an unrecognised code and every transport
-failure, becomes `UNAVAILABLE`.
+`services/dienstverlener-backend/consumer/denial.go` maps the upstream reason
+onto a `denial_code`. Only `FIELD_NOT_PERMITTED` passes through — a refused
+field is the one denial the citizen can act on, by giving consent again.
+Everything else, including `ACCESS_DENIED`, an unrecognised code and every
+transport failure, becomes `UNAVAILABLE`.
 
 The consumer frontend renders that code and nothing else
-(`dienstverlener-mock/src/lib/denialMessage.ts`). It never reads `reason`,
-which stays technical text for logs and the developer portal. A code the
-frontend does not know falls through to the generic message rather than being
-shown, so a code added to the policy later cannot surface on a citizen's
-screen by default.
+(`dienstverlener-mock/src/lib/denialMessage.ts`). It never reads `reason`, which
+stays technical text for logs and the developer portal. A code the frontend does
+not know falls through to the generic message rather than being shown, so a code
+added to the policy later cannot surface on a citizen's screen by default.
 
 The citizen screen shows the trace-id, which is something to quote to a
 helpdesk, and not the reason code, which is operator detail. The developer
 portal is where the full decision, its reason and the policy path are shown.
 
-One caveat while running this demo: the FSC Inway drops the PDP's reason
-before it reaches the consumer ([OpenFSC #308](https://gitlab.com/rinis-oss/fsc/open-fsc/-/issues/308)),
-so until that fix lands upstream every denial degrades to the generic message.
-The backend handles both cases; the specific messages appear once the Inway
-forwards the reason.
+One caveat while running this demo: the FSC Inway drops the PDP's reason before
+it reaches the consumer
+([OpenFSC #308](https://gitlab.com/rinis-oss/fsc/open-fsc/-/issues/308)), so
+until that fix lands upstream every denial degrades to the generic message. The
+backend handles both cases; the specific messages appear once the Inway forwards
+the reason.
 
 ## Testing
 
@@ -572,18 +565,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull-request checklist.
 ### Editing policies
 
 The PDP in the default stack loads `policies/` from disk and hot-reloads on
-save. A module that does not compile is not rejected loudly: OpenFTV still
-logs `policy added/replaced`, stays healthy and keeps answering with the
-previous rules ([#151](https://github.com/ICTU/GBO-demo/issues/151)). A rule
-whose change has no effect is therefore often a rule that never compiled. Run
+save. A module that does not compile is not rejected loudly: OpenFTV still logs
+`policy added/replaced`, stays healthy and keeps answering with the previous
+rules ([#151](https://github.com/ICTU/GBO-demo/issues/151)). A rule whose change
+has no effect is therefore often a rule that never compiled. Run
 
 ```bash
 make policy-check
 ```
 
 after every edit. It reports a syntax error with file and line in a second or
-two, without the stack running. Every `make` target that starts the PDP runs
-it first.
+two, without the stack running. Every `make` target that starts the PDP runs it
+first.
 
 ## Troubleshooting
 
@@ -598,17 +591,17 @@ Common fixes:
 
 - use `make demo-full` or the matching `demo-*` target instead of starting
   individual containers;
-- after changing source metadata, rerun `make onboard-demo-sources`; the
-  adapter observes the promoted release live. Run `make eudi-config` to
-  rematerialize and restart the issuance-server;
+- after changing source metadata, rerun `make onboard-demo-sources`; the adapter
+  observes the promoted release live. Run `make eudi-config` to rematerialize
+  and restart the issuance-server;
 - scan a fresh QR after a restart or metadata change;
 - if Cloudflare reports `HIT` or an increasing `Age` for issuer metadata,
   correct the cache-bypass rule and purge the issuance hostname;
 - use `make demo-down` to stop both stacks, or `make fsc-clean` only when you
   intentionally want to remove disposable local FSC state.
 
-The detailed diagnosis for port conflicts, certificates, FSC contracts,
-source activation, wallet trust and cached QR sessions is in
+The detailed diagnosis for port conflicts, certificates, FSC contracts, source
+activation, wallet trust and cached QR sessions is in
 [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ## Further reading
@@ -632,5 +625,4 @@ GBO is maintained by the Dutch Ministry of the Interior and Kingdom Relations
 ## Repository owner
 
 The repository owner is **Jeroen de Kok** (ICTU), reachable at
-<jeroen.dekok@ictu.nl>. See `publiccode.yml` for additional repository
-metadata.
+<jeroen.dekok@ictu.nl>. See `publiccode.yml` for additional repository metadata.
