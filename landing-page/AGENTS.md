@@ -16,9 +16,10 @@ the infrastructure. Static, no backend of its own; its one proxied path is
   `${VAR}` counts as unset. These are browser-side URLs: published host ports
   and `GBO_PUBLIC_HOST`, never Compose service names.
 - The wallet link is built client-side (`walletUniversalLink` in `src/eudi.ts`),
-  deliberately duplicated in the developer portal's `EudiForm.tsx`; change both.
-  Its `client_id` is derived from `EUDI_PUBLIC_URL` because the issuance server
-  derives it the same way; without that URL the page shows why there is no QR.
+  deliberately duplicated in the developer portal's `src/eudi.ts`
+  (`walletUniversalLinkFor`); change both. Its `client_id` is derived from
+  `EUDI_PUBLIC_URL` because the issuance server derives it the same way; without
+  that URL the page shows why there is no QR.
 - The offers come from the active source release (`eudi-adapter`'s
   `/eudi-offers.json`); an offer's `key` is a disclosure usecase of the issuance
   server. In the image `15-configure-eudi-offers.sh` writes that location at
@@ -57,5 +58,9 @@ set.
   [#138](https://github.com/ICTU/GBO-demo/pull/138).
 - Installatie Register as a scenario in the DvTP card, not a stream:
   [#628](https://github.com/ICTU/GBO-demo/pull/628).
-- `.npmrc` installs no npm release younger than seven days:
-  [#197](https://github.com/ICTU/GBO-demo/pull/197).
+
+## Links
+
+- [../docs/frontends.md](../docs/frontends.md): serving, runtime configuration
+  and npm policy shared by the frontends; open before adding a proxy route or a
+  runtime variable.

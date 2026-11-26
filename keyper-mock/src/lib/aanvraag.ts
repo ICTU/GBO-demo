@@ -1,6 +1,6 @@
 // The Installatie Register's own state for one demo run: the installer's
-// request, the owner's decision and the DvTP consent token IR keeps for its
-// recurring ownership checks. None of this is GBO — in the pilot it lives in
+// request, the owner's decision and the id of the DvTP consent; IR's backend
+// keeps the consent token for the recurring ownership checks. None of this is GBO — in the pilot it lives in
 // IR (Keyper). The demo switches between installer and owner in one browser,
 // so sessionStorage is enough.
 

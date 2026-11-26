@@ -80,9 +80,10 @@ Check the `make fsc-seed-bri` output. Common causes:
   `fsc-infra/.env` before the first `make demo`, or, when the old FSC state is
   disposable, run `make fsc-clean` and start again. `make fsc-clean` removes the
   shared `fsc-infra` volumes, including those of the other checkout.
-- **HTTP 500 `unknown protocol`**: manager v2.4.0 versus script mismatch. Verify
-  that `services/dev-portal-backend/fsctxlog.go` and this script use the same
-  FSC version.
+- **HTTP 500 `unknown protocol`**: the Manager does not know the service
+  `protocol` the script sends (`PROTOCOL_TCP_HTTP_1.1` in
+  `fsc-infra/scripts/seed-bri-contract.sh`). Check that the script matches the
+  FSC version of the images in `fsc-infra/docker-compose.yml`.
 - **HTTP 401**: inspect the responding Manager's logs and the client certificate
   used by the seed. Auto-sign configuration is separate: `directory-manager`
   uses `--auto-sign-grants=servicePublication`; source Managers use

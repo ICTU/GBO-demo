@@ -37,29 +37,47 @@ sequenceDiagram
     autonumber
     actor B as Burger
     participant K as Keyper (IR)
+    participant IB as ir-backend
     participant P as Toestemmingsportaal
     participant R as Consent-register
     participant PDP as PDP LVG
     participant S as Sidecar LVG
     participant L as LVG
-    K->>P: vraag toestemming (scope lvg:vbo:eigendom)
+    B->>K: verzoek openen, naar MijnOverheid
+    K->>IB: POST /api/consent/start (scope lvg:vbo:eigendom)
+    IB->>P: pushed request via FSC (PAR)
+    P-->>IB: request_uri
+    IB-->>K: redirect_to met client_id en request_uri
+    K->>P: browser naar het portaal
+    P-->>B: inloggen, verzoek tonen
     B->>P: inloggen, akkoord
     P->>R: consent met versleutelde waarden per bron
-    R-->>P: consent-token
-    P-->>K: consent-token
+    R-->>P: consent-id en consent-token
+    Note over P: token onder een eenmalige code
+    P-->>K: /verzoek/terug met code en state
+    K->>IB: POST /api/consent/complete (code, state)
+    IB->>P: code en PKCE-verifier via FSC
+    P-->>IB: consent-token
+    Note over IB: token in de sessie (HttpOnly-cookie)
+    IB-->>K: uitkomst en consent-id, zonder token
+    K-->>B: goedkeuringsscherm
     B->>K: goedkeuren (IR-toestemming voor de installateur)
-    K->>PDP: vbo(plaatshouder, vboId) via IR-outway
+    K->>IB: POST /api/dvtp/query (vbo_id)
+    IB->>PDP: vbo(plaatshouder, vboId) met consent-token via IR-outway
     PDP->>R: status?
     R-->>PDP: ACTIVE
     PDP->>S: ALLOW
     Note over S: plaatshouder naar BSN, ontsleuteld uit het token
     S->>L: vbo(bsn, vboId)
-    L-->>K: vboId of null
+    L-->>S: vboId of null
+    S-->>IB: vboId of null
+    IB-->>K: antwoord, zonder token
 ```
 
-IR bewaart het consent-token en stelt bij elke opvraging door de installateur
-dezelfde vraag opnieuw. Trekt de burger de toestemming in MijnOverheid in, dan
-weigert de PDP die herhaalde vraag en geeft IR niets vrij.
+`ir-backend` bewaart het consent-token in zijn sessie; de browser kent alleen
+het consent-id. Bij elke opvraging door de installateur stelt IR dezelfde vraag
+opnieuw. Trekt de burger de toestemming in MijnOverheid in, dan weigert de PDP
+die herhaalde vraag en geeft IR niets vrij.
 
 De drie uitkomsten:
 
@@ -112,5 +130,3 @@ Meidoornhof 12.
 
 - Met één toestemming kan IR voor elk VBO-id vragen of de burger eigenaar is. Of
   het VBO-id in de toestemming zelf moet staan, ligt bij de pilot.
-- In de simulatieomgeving heeft IR een eigen afnemer-peer van het platform
-  nodig; tot die er is draait deze flow alleen lokaal.

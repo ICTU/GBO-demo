@@ -43,11 +43,12 @@ adapter catalog. The bron services themselves are recognised by their
 
 The production developer-portal image accepts these runtime variables:
 
-| Variable             | Purpose                              |
-| -------------------- | ------------------------------------ |
-| `JAEGER_PUBLIC_URL`  | Public Jaeger UI used by trace links |
-| `GRAFANA_PUBLIC_URL` | Public Grafana UI used by log links  |
-| `EUDI_PUBLIC_URL`    | Public issuance-server URL           |
+| Variable                | Purpose                                                                                   |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| `JAEGER_PUBLIC_URL`     | Public Jaeger UI used by trace links                                                      |
+| `GRAFANA_PUBLIC_URL`    | Public Grafana UI used by log links                                                       |
+| `EUDI_PUBLIC_URL`       | Public issuance-server URL                                                                |
+| `OWN_ISSUER_PUBLIC_URL` | Public URL of the own credential issuer, whose disclosure offers give the EU-wallet links |
 
 `dev-portal-backend` accepts:
 
@@ -58,9 +59,9 @@ The production developer-portal image accepts these runtime variables:
 | `LOKI_DECISION_QUERY`         | LogQL selector for the engine's console decision log     |
 | `FSC_TXLOG_*_URL/CERT/KEY/CA` | Local txlog-api or remote Manager logging source         |
 
-`BD_HV` and `BD_EDI` are optional provider-log sources. They allow the same
-provider Manager to be queried from the authorized perspective of the DvTP and
-EUDI consumer peers respectively.
+`BD_HV`, `BD_EDI` and `BD_ASIP` are optional provider-log sources. They allow
+the same provider Manager to be queried from the authorized perspective of the
+DvTP, EUDI and ASIP consumer peers respectively.
 
 ## Data handling
 

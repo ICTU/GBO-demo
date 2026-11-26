@@ -11,7 +11,9 @@ decisions, FSC transaction logs, LDV chains), takes the collector's OTLP spans
 for the live strip and watch-next, and relays the ASI tab to the reference QTSP.
 It does not proxy chain calls, so traces get no extra hop. A block whose
 configuration is missing answers empty or with its own error; the service still
-starts.
+starts. The flat `package main` is not an exception to
+[../AGENTS.md](../AGENTS.md): a block that changes moves behind a port, as
+`internal/testpid` and `internal/revocation` did.
 
 ## Contracts
 
@@ -36,7 +38,10 @@ starts.
 - `LDV_LOGBOOKS` ids must equal what records hold in `dpl.read.nextLogbookId`; a
   new logbook in Compose needs an entry here.
 - A txlog peer needs its prefix in `loadConfig`, plus env and a certificate
-  mount in `docker-compose.yml`.
+  mount in `docker-compose.yml`. `BD_HV`, `BD_EDI` and `BD_ASIP` read a remote
+  provider's peer-facing Manager from a consumer peer's view (no `group_id`),
+  for the simulation deployment; Compose reads BD's own txlog-api (`BD`) and
+  sets none of them.
 - Test PID (`TEST_PID_OFFERS_URL`) and revocation
   (`CREDENTIAL_ISSUER_INTERNAL_URL`) are demo shortcuts: anyone reaching the
   backend gets a PID or revokes anything. Never on in a shared environment.

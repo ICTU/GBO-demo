@@ -13,11 +13,10 @@ live span stream and the history sit in
 
 ## Contracts
 
-- Two ways of serving with the same proxy routes: Compose runs the image's
-  `build` stage as the Vite dev server (`vite.config.ts`, targets from
-  `*_TARGET`, `src/` mounted), the image's final stage is nginx (`nginx.conf`,
-  fixed Compose names). A new route goes in both, unbuffered, because
-  `/api/dev/events` and `/api/dev/watch-next` are SSE.
+- Proxy routes live in both `vite.config.ts` (Compose) and `nginx.conf` (the
+  published image; see [../docs/frontends.md](../docs/frontends.md)). A new
+  route goes in both, unbuffered, because `/api/dev/events` and
+  `/api/dev/watch-next` are SSE.
 - `/bron-api/<source>/` paths equal `graphqlPath` in `src/data/bronnen.ts`. Its
   `gatewaySvc` and `bronSvc`, and the services in `src/data/chains.ts` and
   `src/util/consumer.ts`, must match the `OTEL_SERVICE_NAME`s and services in
@@ -26,6 +25,10 @@ live span stream and the history sit in
   (`docker-entrypoint.d/40-runtime-config.sh`); code reads it first, then
   `import.meta.env.VITE_*`. A new URL goes in the script, `src/vite-env.d.ts`,
   its reader and Compose. Everything here ends up in the browser: no secrets.
+- Demo shortcut: no authentication, and `/bron-api/` and `/jaeger-api/` reach
+  the source GraphQL servers and Jaeger directly, past FSC and the PDP, so
+  whoever reaches the portal can query every source. A real deployment does not
+  expose the sources this way.
 - Correlation: the trace id finds the LDV chain; the span tag
   `gbo.fsc.transaction_id` finds the FSC transaction logs and the PDP decision.
   The ADL record is the decision and colours the PDP; the Loki console line is
@@ -68,6 +71,9 @@ mounts can be stale. Empty DvTP tabs are expected with `make demo-minimal` and
 
 ## Links
 
+- [../docs/frontends.md](../docs/frontends.md): serving, runtime configuration
+  and npm policy shared by the frontends; open before adding a proxy route or a
+  runtime variable.
 - [../OBSERVABILITY.md](../OBSERVABILITY.md): traces, Loki, ADL and runtime
   variables; open before changing a correlation panel.
 - [../docs/debugging-eudi-wallet.md](../docs/debugging-eudi-wallet.md): when an

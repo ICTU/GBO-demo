@@ -501,9 +501,9 @@ func writeSSE(w io.Writer, event string, payload any) {
 // handleWatchNext streams a single SSE event with the trace_id of the next
 // new trace ingested into the hub, then closes. Frontend uses this for the
 // "watch"-button: pick up any flow started in another tab (burger-FE,
-// afnemer-mock) without manual trace_id juggling. Self-traffic (dev-portal-
-// backend's own /history /events /watch-next spans) is filtered in ingest()
-// so it never reaches the watcher.
+// afnemer-mock) without manual trace_id juggling. Only spans matching
+// entryPointRules wake a watcher (ingest()), so this backend's own
+// /history /events /watch-next spans never do.
 //
 // ?session=<id> narrows the wait to this dev-portal session's own flows;
 // ?usecase=<key> does the same for EUDI, which carries no session id.

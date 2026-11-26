@@ -198,7 +198,7 @@ type Scenario struct {
 	ID              string          `json:"id"`
 	Name            string          `json:"name"`
 	Desc            string          `json:"desc"`
-	Tab             string          `json:"tab"` // "issuance" | "use"
+	Tab             string          `json:"tab"` // a Tab of developer-portal/src/types.ts: "issuance" | "use" | "eudi-issuance" | "asi-verify"
 	ExpectedOutcome string          `json:"expected_outcome,omitempty"`
 	UserSaved       bool            `json:"user_saved"`
 	Payload         json.RawMessage `json:"payload"`
