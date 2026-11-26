@@ -17,6 +17,14 @@ labels: bug
 1. `make demo` (or a specific target / curl / UI action)
 2. …
 
+## Environment
+
+- OS + arch:
+- Docker version:
+- Compose plugin version:
+
+<!-- Logs from `docker compose logs <service>` help. -->
+
 ## Acceptance criteria (optional; maintainers complete this when triaging)
 
 <!-- Each one checkable on its own. Describe behaviour, not file paths. -->
@@ -31,11 +39,3 @@ labels: bug
 
 <!-- Requirement IDs from the technical design (https://github.com/ICTU/GBO-TO)
      this issue touches: REQ-…, SL-…, F-…, or links to them. -->
-
-## Environment
-
-- OS + arch:
-- Docker version:
-- Compose plugin version:
-
-<!-- Logs from `docker compose logs <service>` help. -->
