@@ -1,0 +1,9 @@
+# Read by oxfmt (and Prettier). scripts/md-format.sh passes Markdown files
+# only; this file keeps out what is not ours to reformat.
+
+# Git submodule with upstream code and docs.
+vendor/
+
+# Installed and generated files.
+node_modules/
+.local/

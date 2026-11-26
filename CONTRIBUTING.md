@@ -32,6 +32,9 @@ Before opening a PR:
 
    # No real OINs, internal hostnames or secrets (demo OINs: 99999999...)
    make check-safety
+
+   # Markdown wrapped at 80 columns, one style (make md-fmt fixes it)
+   make md-check
    ```
 
 2. Keep the demo runnable end-to-end (`make demo` must still work).
