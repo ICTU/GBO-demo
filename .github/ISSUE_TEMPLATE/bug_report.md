@@ -4,22 +4,18 @@ about: Something broke while running or building the demo
 labels: bug
 ---
 
-## What happened
+## Current behaviour
 
-<!-- One or two lines. Include an error message or unexpected behaviour. -->
+<!-- What happens: error text, response, screenshot. -->
+
+## Wanted behaviour
+
+<!-- What should happen instead, in terms of behaviour or contract (API response, flow step, UI result). -->
 
 ## Steps to reproduce
 
 1. `make demo` (or a specific target / curl / UI action)
 2. …
-
-## Expected
-
-<!-- What did you think would happen? -->
-
-## Actual
-
-<!-- Screenshot, error text, or a link to a paste. -->
 
 ## Environment
 
@@ -27,6 +23,19 @@ labels: bug
 - Docker version:
 - Compose plugin version:
 
-## Extra context
+<!-- Logs from `docker compose logs <service>` help. -->
 
-<!-- Anything else that might help. Logs from `docker compose logs <service>` are useful. -->
+## Acceptance criteria (optional; maintainers complete this when triaging)
+
+<!-- Each one checkable on its own. Describe behaviour, not file paths. -->
+
+- [ ] …
+
+## Out of scope (optional)
+
+<!-- What this issue does not cover. -->
+
+## Related GBO-TO IDs (optional)
+
+<!-- Requirement IDs from the technical design (https://github.com/ICTU/GBO-TO)
+     this issue touches: REQ-…, SL-…, F-…, or links to them. -->

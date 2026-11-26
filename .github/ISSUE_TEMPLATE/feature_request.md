@@ -4,14 +4,29 @@ about: Suggest something new for the demo
 labels: enhancement
 ---
 
-## What would you like the demo to show?
+## Current behaviour
 
-<!-- A specific scenario, a new access flow, an alternative policy engine, etc. -->
+<!-- What the demo does today in this area, or "nothing". -->
+
+## Wanted behaviour
+
+<!-- What the demo should show or do: a scenario, a flow, a contract (API, message, policy decision). A ```mermaid diagram helps for flows. -->
 
 ## Why
 
 <!-- What understanding does this add? Which architecture question does it clarify? -->
 
-## Sketch of the approach (optional)
+## Acceptance criteria
 
-<!-- If you already have an idea of the implementation, share it here. -->
+<!-- Each one checkable on its own. Describe behaviour and contracts, not file paths. -->
+
+- [ ] …
+
+## Out of scope
+
+<!-- What this request does not cover. -->
+
+## Related GBO-TO IDs (optional)
+
+<!-- Requirement IDs from the technical design (https://github.com/ICTU/GBO-TO)
+     this issue touches: REQ-…, SL-…, F-…, or links to them. -->

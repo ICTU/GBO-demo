@@ -4,12 +4,12 @@ Thanks for taking the time to look at this reference-architecture demo. Bug repo
 
 ## Reporting issues
 
-Please use GitHub Issues for bug reports and feature discussions. Include:
+Please use GitHub Issues for bug reports and feature discussions, with the bug report or feature request template. Describe:
 
-- What you tried to run (`make demo`, a specific `curl`, a UI interaction)
-- What you expected to happen
-- What actually happened (error message, screenshot, log snippet)
-- Your environment (OS, Docker version)
+- Current and wanted behaviour, in terms of behaviour and contracts (API responses, flow steps, UI results), not file paths
+- Acceptance criteria that can each be checked on their own, and what is out of scope (for bugs: if you know them)
+- Related GBO-TO requirement IDs (REQ-, SL-, F-), if you know them
+- For bugs: how to reproduce it and your environment (OS, Docker version)
 
 For security issues, see [SECURITY.md](SECURITY.md) — please do **not** open a public issue.
 
@@ -38,7 +38,16 @@ Before opening a PR:
 
 3. Match the code style of the file you're editing. New Go services get the same `.golangci.yml` treatment as existing ones.
 
-4. Include a short PR description: what changes, why, and how you verified it works.
+4. Fill in the PR template (`.github/pull_request_template.md`). Solution
+   always shows before and after: screenshots for a UI change; for a behaviour,
+   flow, state or structure change, the diagram that shows it most clearly (e.g.
+   sequence, state, flowchart, class, ER, C4/architecture, or a table; a
+   ```` ```mermaid ```` block renders on GitHub and GitLab); or
+   "No visual comparison: <reason>". Evidence is real output (test or command
+   output, a demo step) proving the after state works; the After screenshot in
+   Solution can count. With gh 2.105 or newer you can attach a screenshot from
+   the command line: `gh pr create --attach './after.png#After'` (also works with
+   `gh pr edit`).
 
 ## Scope
 
