@@ -907,9 +907,10 @@ fsc-seed-rvig-source: fsc-local-env
 
 # One FSC participant publishes two logical metadata services. The manually
 # configured service reference selects which source document is fetched.
-# Metadata transport is not subject-bound: no consent token means the
-# bron-sidecar passes through, and the metadata policy path gates on subject,
-# method and endpoint (#334).
+# Metadata transport is not subject-bound: both services point at the GraphQL
+# servers directly, not through bron-sidecar (which forwards POST /graphql
+# only), and the metadata policy path gates on subject, method and endpoint
+# (#334).
 fsc-seed-metadata: fsc-local-env
 	docker run --rm \
 		--network $(FSC_INFRA_NETWORK) \

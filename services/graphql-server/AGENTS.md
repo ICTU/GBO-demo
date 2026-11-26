@@ -29,9 +29,8 @@ or playground here; the developer portal's playground reads the introspection.
   nil, so its methods stay nil-safe. One record per requested year (no filter:
   every year served), under `LDV_YEAR_ACTIVITY_TEMPLATE`. An activity missing
   from `services/ldv-logboek/config/verwerkingsactiviteiten-bd.json` does not
-  fail the request, whatever `activityForYear` says: the logbook refuses it at
-  delivery, which blocks the outbox (see
-  [../ldv-client](../ldv-client/AGENTS.md)).
+  fail the request: the logbook refuses it at delivery, which blocks the outbox
+  (see [../ldv-client](../ldv-client/AGENTS.md)).
 - `mockdata/` is also mounted into `dev-portal-backend` (`/citizens`).
 
 ## Verify

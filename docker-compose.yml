@@ -931,8 +931,9 @@ services:
 
   # Same sidecar image in front of the BRP bron. The sidecar is bron-agnostic
   # (UPSTREAM_URL + PSEUDONYM_VARS), so a second bron needs a second instance,
-  # not a second implementation. The BRP service is EUDI-only for now, so no
-  # request carries a consent token and in practice this is pass-through; it
+  # not a second implementation. The BRP service has no DvTP consumer yet (only
+  # the EUDI issuance and the ASI route read it), so no request carries a
+  # consent token and in practice this is pass-through; it
   # stays in place so a DvTP consumer can be added later without moving the
   # FSC service endpoint.
   brp-sidecar:

@@ -40,6 +40,12 @@ forwarded.
   record directly (no outbox); if either fails the data is withheld.
   `DATA_USAGE_LOGBOOK_ID` must match the consent register's keys (see
   [../data-usage-index](../data-usage-index/AGENTS.md)).
+- That logbook ID names the peer where the delivery logbook's read service is
+  published, not where the source is: `brp-sidecar` uses `…0400/ldv-lezen-brp`
+  (RvIG's own peer), while every demo target publishes the BRP source itself as
+  service `brp` on `…0200` (`make fsc-seed-rvig-source`). `make fsc-seed-brp`
+  (`brp` on `…0400`) is run by no demo target. No DvTP consumer reads BRP yet,
+  so `brp-sidecar` passes requests on.
 
 ## Pitfalls
 
@@ -69,13 +75,6 @@ End to end: `make demo-dvtp`, run a DvTP query, then read the chain
   [#494](https://github.com/ICTU/GBO-demo/pull/494).
 - Each delivery under a consent registered and recorded before the data leaves:
   [#706](https://github.com/ICTU/GBO-demo/pull/706).
-
-## Open questions
-
-- `brp-sidecar` registers deliveries as peer `…0400`, where `fsc-seed-brp`
-  publishes service `brp`, while the EUDI issuance and the ASIP use `brp` on
-  `…0200`, and `docker-compose.yml` still calls it pass-through in practice. Is
-  `…0400` the BRP source for DvTP, and is that comment stale?
 
 ## Links
 
