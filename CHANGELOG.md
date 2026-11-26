@@ -688,6 +688,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - **The safety audit runs in CI** (`safety` job, `scripts/check-safety.sh`) and
   scans every tracked file. It now flags OINs with a real register prefix;
   test data uses demo OINs (`99999999…`) instead.
+- **The demo starts in order through compose instead of retries and
+  waiting scripts**: each FSC migration runs once and its peer services
+  wait for it to complete, instead of restarting on failure while the
+  services start anyway. The migrations allow 10 s to connect, name lookup
+  included, because Docker's DNS can be that slow while the whole stack
+  starts at once. A `postgres-init` one-shot in `fsc-infra` creates
+  the FSC databases on every `up` and holds their only list, which replaces
+  the initdb script and `make fsc-databases`. `make demo-manager` now seeds
+  the OpenFTV Manager before the rest of the stack starts, so the PDP pulls
+  the policy bundle at boot without a restart.
+- **The PDP reads the DvTP onboarding register live**: contract auto-signing
+  and the integrator mandate check ask the register with `http.send` on
+  every decision that needs it (`policies/gbo/register.rego`), as the
+  consent status already was, instead of OpenFTV pulling it every five
+  seconds. A freshly started PDP therefore decides on the register from its
+  first request, so its healthcheck is the plain `/healthz` and
+  `scripts/wait-openftv-admission.sh`, which waited for the first pull, is
+  gone; so is the pull configuration (`services/openftv-pdp/pip-pull/` and
+  its Helm ConfigMap example; the Helm values now set `GBO_REGISTER_URL`).
+  A change in the register counts from the next decision. When the register
+  does not answer, auto-signing refuses with `ADMISSION_REGISTER_UNAVAILABLE`
+  and a delegated call with `INTEGRATOR_REGISTER_UNAVAILABLE`, where before
+  the PDP went on deciding on the last copy it had pulled. The OpenFSC
+  Manager does not ask again after a refusal, so a contract submitted while
+  the register is down stays pending until it is submitted again.
+- **One table holds the FSC parties' certificate data**: `fsc-infra/peers.txt`
+  lists per party its directory, OIN, subject, host names and internal-CA
+  names. One script, `fsc-infra/pki/bootstrap-peer.sh NAME...`, generates
+  the certificates from it and replaces the ten `bootstrap-<party>.sh`
+  scripts and their `*-internal-ca.json` and `*-internal-cert.json` files;
+  `regenerate-internal-certs.sh` and `make fsc-clean` read the same table,
+  so the certificates of a new party take one row. One target, `make
+  fsc-certs`, generates the certificates of every party in the table and
+  replaces the per-party `fsc-<party>-certs` targets. The generated files,
+  subjects and ownership are unchanged.
+- **One template per FSC component in `fsc-infra/docker-compose.yml`**: the
+  Controller, Manager, Inway, Outway, txlog API and their migrations each
+  have one template, and every peer's services add only their own names,
+  certificates, databases and ports. The OpenFSC images and their version
+  are named in one place. The file shrinks from about 1,860 to 1,130 lines;
+  the resolved compose configuration is unchanged.
 - **Credentials without a revocation reference are valid for 24 hours**
   (#697): the own credential issuer cannot revoke what it issued through
   login, disclosure-based issuance or an offer without `reference`, so those

@@ -1,38 +1,13 @@
-#!/bin/bash
-# Executed by the postgres container at startup.
-# Creates the databases that the directory-peer and each org need.
+#!/bin/sh
+# Creates the databases of the directory peer and of each org peer.
+# Run by the postgres-init one-shot on every `up`; idempotent, so an existing
+# volume also gets databases added later.
 
-set -euo pipefail
+set -eu
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
-    CREATE DATABASE fsc_dir_controller;
-    CREATE DATABASE fsc_dir_manager;
-    CREATE DATABASE fsc_dir_txlog;
-    CREATE DATABASE fsc_edi_controller;
-    CREATE DATABASE fsc_edi_manager;
-    CREATE DATABASE fsc_edi_txlog;
-    CREATE DATABASE fsc_bd_controller;
-    CREATE DATABASE fsc_bd_manager;
-    CREATE DATABASE fsc_bd_txlog;
-    CREATE DATABASE fsc_hv_controller;
-    CREATE DATABASE fsc_hv_manager;
-    CREATE DATABASE fsc_hv_txlog;
-    CREATE DATABASE fsc_brp_controller;
-    CREATE DATABASE fsc_brp_manager;
-    CREATE DATABASE fsc_brp_txlog;
-    CREATE DATABASE fsc_cr_controller;
-    CREATE DATABASE fsc_cr_manager;
-    CREATE DATABASE fsc_cr_txlog;
-    CREATE DATABASE fsc_pdp_controller;
-    CREATE DATABASE fsc_pdp_manager;
-    CREATE DATABASE fsc_pdp_txlog;
-    CREATE DATABASE fsc_ir_controller;
-    CREATE DATABASE fsc_ir_manager;
-    CREATE DATABASE fsc_ir_txlog;
-    CREATE DATABASE fsc_int_controller;
-    CREATE DATABASE fsc_int_manager;
-    CREATE DATABASE fsc_int_txlog;
-    CREATE DATABASE fsc_asip_controller;
-    CREATE DATABASE fsc_asip_manager;
-    CREATE DATABASE fsc_asip_txlog;
-EOSQL
+for peer in dir edi bd hv brp cr pdp ir int asip; do
+  for role in controller manager txlog; do
+    printf "SELECT 'CREATE DATABASE fsc_%s_%s' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'fsc_%s_%s')\\\\gexec\n" \
+      "$peer" "$role" "$peer" "$role"
+  done
+done | psql -v ON_ERROR_STOP=1 --quiet

@@ -77,11 +77,11 @@ fail_unsigned() {
     echo "    the openftv-pdp console log in the Aspire dashboard: search for"
     echo "    auto_sign_contract and read .result.response"
     echo ""
-    echo "  ADMISSION_REGISTER_UNAVAILABLE: the admission register did not reach"
-    echo "  the PDP. Check the OpenFTV PIP pull and the onboarding register."
-    echo "  PARTY_NOT_IN_REGISTRY: the register arrived, but the peer is absent."
-    echo "  Add it in the dvtp-onboarding-register (its URL is in the Aspire dashboard),"
-    echo "  wait for the PIP pull, and re-run."
+    echo "  ADMISSION_REGISTER_UNAVAILABLE: the PDP could not read the onboarding"
+    echo "  register. Check that dvtp-onboarding-register is running."
+    echo "  PARTY_NOT_IN_REGISTRY: the register answered, but the peer is absent."
+    echo "  Add it in the dvtp-onboarding-register (its URL is in the Aspire dashboard)"
+    echo "  and re-run."
   } >&2
   exit 1
 }

@@ -69,13 +69,14 @@ shows them exiting with code 137 (OOM kills).
 ## Missing certificates
 
 The AppHost creates the local FSC certificates before it starts the FSC
-peers: `fsc-root-ca`, then one `<peer>-certs` step per peer, through
-`aspire/scripts/fsc-pki.sh`. Certificate mount failures mean one of those
+peers: `fsc-root-ca`, then one `<peer>-certs` step per peer, which runs
+`fsc-infra/pki/bootstrap-peer.sh` for that party's row in `fsc-infra/peers.txt`
+through `aspire/scripts/fsc-pki.sh`. Certificate mount failures mean one of those
 steps failed; its console log in the dashboard names the cause. The steps
 skip an organisation whose certificates exist, so after a fix restart the
 failed step.
 
-## Migrations racing
+## A migration fails
 
 Each FSC migration step waits for its database (`<peer>-db-<part>`, nested
 under `fsc-postgres`), which Aspire's PostgreSQL integration creates once the
@@ -121,11 +122,11 @@ few times, since the FSC Managers have no health check. Common causes:
   aspire logs openftv-pdp | grep auto_sign_contract | tail -1 | sed 's/^[^{]*//' | jq .result.response
   ```
 
-  `ADMISSION_REGISTER_UNAVAILABLE` means the PDP has no
-  `data.entities.dvtp_participant` document: check the onboarding register
-  and OpenFTV PIP pull. `PARTY_NOT_IN_REGISTRY` means the document is present
-  but does not contain the peer: admit that peer in the register. The source
-  Manager does not counter-sign in either case.
+  `ADMISSION_REGISTER_UNAVAILABLE` means the PDP could not read the
+  onboarding register: check that `dvtp-onboarding-register` is running.
+  `PARTY_NOT_IN_REGISTRY` means the register answered but does not contain
+  the peer: admit that peer in the register. The source Manager does not
+  counter-sign in either case, and does not ask again: re-run the seed.
 
 ## `fsc-seed-consent-authorization` stops: not admitted to the consent register
 

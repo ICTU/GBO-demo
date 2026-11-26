@@ -175,7 +175,7 @@ http://localhost:15126/resources?resource=openftv-pdp&resource=bron-sidecar&reso
 
 - **Go services:** containers built from their own Dockerfiles, with the
   hostnames, container ports and mounts they had under compose. The FSC
-  contracts, the PIP pull config and the collector address them by name.
+  contracts, the policies and the collector address them by name.
 - **Frontends:** Vite dev servers on the host (`AddViteApp`), installed with
   `npm ci`.
 - **Host steps** (`AddExecutable`): the pki-tools image build, the policy
@@ -206,7 +206,7 @@ Sizes measured on macOS (arm64):
 | `../scripts/policy-check.sh [--test]` | Rego structure check and `opa check`; with `--test` also `opa fmt --diff` and `opa test` | `make policy-check`, `make policy-test` |
 | `scripts/provision.sh <step>` | One-off host provisioning: trust lists, registrar root, wallet registration, test PID, QTSP registration, ASI wallet verifiers | the `provision-*`, `publish-trust-lists` and `create-development-registrar-root` targets |
 | `scripts/fsc-clean.sh` | Wipes the FSC certificates and contracts | `make fsc-clean` |
-| `scripts/fsc-pki.sh`, `scripts/nlwallet-image.sh` | Used by the AppHost | `make fsc-*-certs`, `make eudi-images` |
+| `scripts/fsc-pki.sh`, `scripts/nlwallet-image.sh` | Used by the AppHost | `make fsc-certs`, `make eudi-images` |
 
 ## Telemetry
 

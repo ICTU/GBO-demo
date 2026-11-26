@@ -427,7 +427,9 @@ func (m *model) build() {
 		WithEnvironment("PDP_ADL_SERVICE_NAME", "gbo").
 		WithEnvironment("PDP_LOG_LEVEL", "info").
 		WithEnvironment("PDP_REQUEST_MAPPINGS", "ftvgraphql").
-		WithEnvironment("PDP_PIP_PULL_CONFIGS", "/pip-pull/dvtp-onboarding.yaml").
+		// The DvTP onboarding register, read by the policy on every decision
+		// that needs it (policies/gbo/register.rego).
+		WithEnvironment("GBO_REGISTER_URL", "http://dvtp-onboarding-register:4015/internal/openftv/participants").
 		WithEnvironment("GBO_CONSENT_URL", "http://consent-register:4002").
 		WithEnvironment("GBO_CONSENT_STATUS_URL", "http://pdp-outway:8080/consent-status").
 		WithEnvironment("GBO_CONSENT_ISSUER", "https://consent-register.gbo.test").
@@ -438,7 +440,6 @@ func (m *model) build() {
 		WithBindMount(m.repo("policies"), "/policies", aspire.BindMountIsReadOnly(true)).
 		WithBindMount(m.repo("schemas/pdp-mirror"), "/etc/gbo/ftv-graphql", aspire.BindMountIsReadOnly(true)).
 		WithBindMount(m.repo("services/openftv-pdp/certs"), "/certs", aspire.BindMountIsReadOnly(true)).
-		WithBindMount(m.repo("services/openftv-pdp/pip-pull"), "/pip-pull", aspire.BindMountIsReadOnly(true)).
 		WaitForCompletion(policyCheck).
 		WaitForCompletion(postgresFtvInit).
 		WaitForCompletion(pdpCert).
@@ -447,27 +448,6 @@ func (m *model) build() {
 	// The image's logtee exports the PDP's console, the decision log among
 	// it, as OTLP log records of this resource.
 	otlpViaCollector(openftvPdp)
-
-	// The source Managers decide on incoming contracts through the PDP, so
-	// the PDP must answer with the seeded Hypotheek-BV admission before the
-	// first contract is submitted (the PIP pull takes a few seconds after
-	// start).
-	pdpAdmission := m.container("pdp-admission", "gbo-demo/pki-tools", "local").
-		WithImagePullPolicy(aspire.ImagePullPolicyNever).
-		WithBindMount(m.repo("services/openftv-pdp/certs/pdp-service.pem"), "/pdp-ca.pem", aspire.BindMountIsReadOnly(true)).
-		WithEntrypoint("bash").
-		WithArgs([]string{"-c", strings.TrimSpace(`
-request='{"subject":{"type":"peer_id","id":"99999999900000000200","properties":{"self_peer_id":"99999999900000000200","peer_ids":["99999999900000000200","99999999900000000300"]}},"action":{"name":"autosign_contract"},"resource":{"type":"contract","id":"pdp-admission-readiness","properties":{"grant_types":[2]}},"context":{"doelbinding":"auto_sign_contract"}}'
-for i in $(seq 1 60); do
-  if curl -fsS --max-time 2 --cacert /pdp-ca.pem -H 'Content-Type: application/json' -d "$request" https://openftv-pdp:8443/authzen/v1/evaluation | jq -e '.decision == true' >/dev/null 2>&1; then
-    echo "OpenFTV admission data ready"; exit 0
-  fi
-  sleep 1
-done
-echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; exit 1
-`)}).
-		WaitForCompletion(pkiToolsImage).
-		WaitFor(openftvPdp)
 
 	// ── Sources: Belastingdienst, RvIG, LVG and an unsecured demo source ─
 	bsnkMock := goService("bsnk-mock", "Dockerfile", 4003, "../services/bsnk-mock", 0).
@@ -594,16 +574,22 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		// One peer: certificates, migrations, controller, manager, txlog-api
 		// and an inway (provider) or outway (consumer).
 		type peerSpec struct {
-			prefix, pkiDir, certName, bootstrap, db string
-			controllerPort                          int
-			inway, outway                           string
-			authzen                                 bool
-			managerArgs                             []string
-			outwayPort                              int
+			prefix, pkiDir, certName, db string
+			controllerPort               int
+			inway, outway                string
+			authzen                      bool
+			managerArgs                  []string
+			outwayPort                   int
 		}
 		addFscPeer := func(p peerSpec) {
+			// The party's row in fsc-infra/peers.txt; the directory peer's
+			// step also makes the directory UI's group certificate.
+			parties := []string{p.certName}
+			if p.prefix == "directory" {
+				parties = append(parties, "directory-ui")
+			}
 			certs := m.executable(p.prefix+"-certs", "bash", m.repoRoot,
-				"aspire/scripts/fsc-pki.sh", "fsc-infra/pki/"+p.bootstrap).
+				append([]string{"aspire/scripts/fsc-pki.sh", "fsc-infra/pki/bootstrap-peer.sh"}, parties...)...).
 				WaitFor(certportal)
 
 			fsc := func(name, component string) aspire.ContainerResource {
@@ -665,8 +651,10 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 				args = append(args,
 					"--authzen-auto-sign-pdp-address=https://openftv-pdp:8443/authzen/v1",
 					"--authzen-auto-sign-pdp-root-ca=/authzen-ca/pdp-service.pem")
+				// The PDP reads the onboarding register live, so it decides
+				// on the seeded admissions from its first request.
 				manager.WithBindMount(m.repo("services/openftv-pdp/certs"), "/authzen-ca", aspire.BindMountIsReadOnly(true)).
-					WaitForCompletion(pdpAdmission)
+					WaitFor(openftvPdp)
 			}
 			manager.WithArgs(args)
 
@@ -723,39 +711,39 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 			}
 		}
 
-		addFscPeer(peerSpec{prefix: "directory", pkiDir: "directory-peer/pki", certName: "directory-peer", bootstrap: "bootstrap-directory-peer.sh", db: "dir", controllerPort: 8092,
+		addFscPeer(peerSpec{prefix: "directory", pkiDir: "directory-peer/pki", certName: "directory-peer", db: "dir", controllerPort: 8092,
 			inway: "DirectoryInway-01", managerArgs: []string{"--auto-sign-grants=servicePublication"}})
 		if ediOn {
-			addFscPeer(peerSpec{prefix: "edi", pkiDir: "orgs/edi-issuer/pki", certName: "edi-issuer", bootstrap: "bootstrap-edi-issuer.sh", db: "edi", controllerPort: 8094,
+			addFscPeer(peerSpec{prefix: "edi", pkiDir: "orgs/edi-issuer/pki", certName: "edi-issuer", db: "edi", controllerPort: 8094,
 				outway: "EdiOutway-01", outwayPort: 8087})
 		}
 		// The source peers and the consent register's peer also run an
 		// Outway, through which they reach the data usage index (sources)
 		// and the index's lookup and the delivery logbooks (register).
-		addFscPeer(peerSpec{prefix: "bd", pkiDir: "orgs/belastingdienst-mock/pki", certName: "bd-mock", bootstrap: "bootstrap-bd-mock.sh", db: "bd", controllerPort: 8095,
+		addFscPeer(peerSpec{prefix: "bd", pkiDir: "orgs/belastingdienst-mock/pki", certName: "bd-mock", db: "bd", controllerPort: 8095,
 			inway: "BdInway-01", outway: "BdOutway-01", authzen: true})
-		addFscPeer(peerSpec{prefix: "hv", pkiDir: "orgs/hypotheekverlener-mock/pki", certName: "hypotheekverlener", bootstrap: "bootstrap-hypotheekverlener.sh", db: "hv", controllerPort: 8096,
+		addFscPeer(peerSpec{prefix: "hv", pkiDir: "orgs/hypotheekverlener-mock/pki", certName: "hypotheekverlener", db: "hv", controllerPort: 8096,
 			outway: "HvOutway-01"})
-		addFscPeer(peerSpec{prefix: "cr", pkiDir: "orgs/consent-register/pki", certName: "consent-register", bootstrap: "bootstrap-consent-register.sh", db: "cr", controllerPort: 8098,
+		addFscPeer(peerSpec{prefix: "cr", pkiDir: "orgs/consent-register/pki", certName: "consent-register", db: "cr", controllerPort: 8098,
 			inway: "CrInway-01", outway: "CrOutway-01", authzen: true})
-		addFscPeer(peerSpec{prefix: "pdp", pkiDir: "orgs/gbo-pdp/pki", certName: "gbo-pdp", bootstrap: "bootstrap-gbo-pdp.sh", db: "pdp", controllerPort: 8099,
+		addFscPeer(peerSpec{prefix: "pdp", pkiDir: "orgs/gbo-pdp/pki", certName: "gbo-pdp", db: "pdp", controllerPort: 8099,
 			outway: "PdpOutway-01"})
-		addFscPeer(peerSpec{prefix: "ir", pkiDir: "orgs/installatieregister/pki", certName: "installatieregister", bootstrap: "bootstrap-installatieregister.sh", db: "ir", controllerPort: 8100,
+		addFscPeer(peerSpec{prefix: "ir", pkiDir: "orgs/installatieregister/pki", certName: "installatieregister", db: "ir", controllerPort: 8100,
 			outway: "IrOutway-01"})
 		if on("dvtp") {
 			// The RvIG provider peer (...0400). The data flows publish BRP
 			// through the BD participant (...0200); this peer registers the
 			// BRP deliveries under a consent at the data usage index and
 			// publishes their delivery logbook (ldv-lezen-brp).
-			addFscPeer(peerSpec{prefix: "brp", pkiDir: "orgs/brp-mock/pki", certName: "brp-mock", bootstrap: "bootstrap-brp-mock.sh", db: "brp", controllerPort: 8097,
+			addFscPeer(peerSpec{prefix: "brp", pkiDir: "orgs/brp-mock/pki", certName: "brp-mock", db: "brp", controllerPort: 8097,
 				inway: "BrpInway-01", outway: "BrpOutway-01", authzen: true})
 		}
 		if on("integrator") {
-			addFscPeer(peerSpec{prefix: "int", pkiDir: "orgs/integrator/pki", certName: "integrator", bootstrap: "bootstrap-integrator.sh", db: "int", controllerPort: 8101,
+			addFscPeer(peerSpec{prefix: "int", pkiDir: "orgs/integrator/pki", certName: "integrator", db: "int", controllerPort: 8101,
 				outway: "IntOutway-01"})
 		}
 		if on("asi") {
-			addFscPeer(peerSpec{prefix: "asip", pkiDir: "orgs/asip/pki", certName: "asip", bootstrap: "bootstrap-asip.sh", db: "asip", controllerPort: 8102,
+			addFscPeer(peerSpec{prefix: "asip", pkiDir: "orgs/asip/pki", certName: "asip", db: "asip", controllerPort: 8102,
 				outway: "AsipOutway-01"})
 		}
 
@@ -1664,7 +1652,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		{"cfssl", "certportal"}, {"fsc-root-ca", "certportal"},
 		{"pki-tools-image", pkiParent},
 		{"postgres-ftv-init", "postgres-ftv"},
-		{"pdp-cert", "openftv-pdp"}, {"policy-check", "openftv-pdp"}, {"pdp-admission", "openftv-pdp"},
+		{"pdp-cert", "openftv-pdp"}, {"policy-check", "openftv-pdp"},
 		{"source-registry-bootstrap", "postgres-eudi"}, {"source-registry-migrations", "postgres-eudi"},
 		{"credential-issuer-db-bootstrap", "postgres-eudi"},
 		{"provision-belastingdienst-certificates", "source-reconciler"}, {"provision-rvig-certificates", "source-reconciler"},
@@ -1701,7 +1689,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 			m.classify(name, setup)
 		}
 	}
-	for _, name := range []string{"postgres-ftv-init", "pdp-admission", "source-reconciler", "eudi-wallet-verifier-runtime"} {
+	for _, name := range []string{"postgres-ftv-init", "source-reconciler", "eudi-wallet-verifier-runtime"} {
 		m.classify(name, setup)
 	}
 	// Setup steps hide once they succeed (labelAll), except the ones people

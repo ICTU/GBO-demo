@@ -14,11 +14,13 @@ package doelbinding.auto_sign_contract
 # sends no service name and no delegation direction, so this judges who
 # connects, not to which service or in which role.
 #
-# Admitted parties come from the onboarding register, pulled by OpenFTV into
-# data.entities.dvtp_participant. Each lists the sources it was admitted to,
+# Admitted parties come from the onboarding register, read live
+# (policies/gbo/register.rego). Each lists the sources it was admitted to,
 # by Peer ID, and for an integrator the service providers it acts for.
 #
 # `reason` is the refusal code; `response` explains it in the decision log.
+
+import data.gbo.register
 
 default allow := false
 
@@ -42,17 +44,11 @@ grant_type_delegated_service_connection := 3
 
 _subject_attributes := object.get(object.get(input, "subject", {}), "attributes", {})
 _source_peer_id := object.get(_subject_attributes, "self_peer_id", "")
-_pulled_participants := object.get(data.entities, "dvtp_participant", null) if {
-	data.entities
-}
 
-else := null
+# An empty register admits nobody; only an unanswered one is unavailable.
+_register_available := register.participants != null
 
-# An empty register is available data: it admits nobody. Only a missing
-# dvtp_participant document means the PIP pull did not supply a register.
-_register_available := _pulled_participants != null
-
-_parties := _pulled_participants if {
+_parties := register.participants if {
 	_register_available
 }
 

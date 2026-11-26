@@ -583,7 +583,7 @@ test_consent_regime_fields_keep_their_own_reasons if {
 		{"subject": {"attributes": {"outway_delegator_peer_id": "99999999900000000300"}}},
 	)
 		with data.gbo.consent.resolved as _consent
-		with data.entities.dvtp_participant as {}
+		with data.gbo.register.participants as {}
 	result.decision == false
 	"NO_APPLICABLE_RULE" in {d.code | some d in fx.denied(result)}
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
@@ -612,7 +612,7 @@ test_unverifiable_consent_surfaces_its_invalid_code if {
 }
 
 # ── Delegated calls through the engine ───────────────────────────────────
-# The mandate comes from the admission register (data.entities), never from
+# The mandate comes from the admission register (register.rego), never from
 # input. The rule tests use a ready-made pip.integrator; these test the wiring.
 
 _integrator := "99999999900000001100"
@@ -635,7 +635,7 @@ _delegated_input(integrator) := object.union(
 test_delegated_call_by_registered_integrator_allowed if {
 	result := gbo.response with input as _delegated_input(_integrator)
 		with data.gbo.consent.resolved as _consent
-		with data.entities.dvtp_participant as _registered
+		with data.gbo.register.participants as _registered
 	result.decision == true
 	result.context.granted[0].rule == "DVT0001"
 }
@@ -643,7 +643,7 @@ test_delegated_call_by_registered_integrator_allowed if {
 test_delegated_call_by_unregistered_integrator_denied if {
 	result := gbo.response with input as _delegated_input("99999999900000001199")
 		with data.gbo.consent.resolved as _consent
-		with data.entities.dvtp_participant as _registered
+		with data.gbo.register.participants as _registered
 	result.decision == false
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
 }
@@ -653,6 +653,7 @@ test_delegated_call_by_unregistered_integrator_denied if {
 test_delegated_call_without_admission_register_is_pip_unavailable if {
 	result := gbo.response with input as _delegated_input(_integrator)
 		with data.gbo.consent.resolved as _consent
+		with data.gbo.register.participants as null
 	result.decision == false
 	fx.client(result) == {"code": "ACCESS_DENIED"}
 	fx.request_code(result) == {"code": "PIP_UNAVAILABLE"}
@@ -666,7 +667,7 @@ test_delegated_call_without_admission_register_is_pip_unavailable if {
 test_delegated_call_with_empty_admission_register_denied if {
 	result := gbo.response with input as _delegated_input(_integrator)
 		with data.gbo.consent.resolved as _consent
-		with data.entities.dvtp_participant as {}
+		with data.gbo.register.participants as {}
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
 }
 
@@ -677,13 +678,14 @@ test_direct_call_without_admission_register_allowed if {
 	result.decision == true
 }
 
-# A mandate in input is not one the policy pulled: dropped, like pip.consent.
+# A mandate in input is not one the policy read from the register: dropped,
+# like pip.consent.
 test_input_pip_integrator_is_not_trusted if {
 	forged := {"integrator": _registered[_integrator]}
 	req := object.union(_delegated_input(_integrator), {"context": {"pip": forged}})
 	result := gbo.response with input as req
 		with data.gbo.consent.resolved as _consent
-		with data.entities.dvtp_participant as {}
+		with data.gbo.register.participants as {}
 	result.decision == false
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
 }
@@ -694,7 +696,7 @@ test_input_pip_register_state_is_not_trusted if {
 	req := object.union(_delegated_input(_integrator), {"context": {"pip": forged}})
 	result := gbo.response with input as req
 		with data.gbo.consent.resolved as _consent
-		with data.entities.dvtp_participant as _registered
+		with data.gbo.register.participants as _registered
 	result.decision == true
 }
 
@@ -703,7 +705,7 @@ test_input_pip_register_state_is_not_trusted if {
 test_delegated_call_without_consent_token_denied if {
 	req := object.union(fx.income(_integrator, "999991772", [2024], {}), {"subject": {"attributes": {"outway_delegator_peer_id": "99999999900000000300"}}})
 	result := gbo.response with input as req
-		with data.entities.dvtp_participant as _registered
+		with data.gbo.register.participants as _registered
 	result.decision == false
 }
 
@@ -714,21 +716,21 @@ _with_mandate(acts_for, active) := {_integrator: object.union(_registered[_integ
 test_delegated_call_for_an_unregistered_provider_denied if {
 	result := gbo.response with input as _delegated_input(_integrator)
 		with data.gbo.consent.resolved as _consent
-		with data.entities.dvtp_participant as _with_mandate([{"peer_id": "99999999900000000999", "rules": ["DVT0001"]}], true)
+		with data.gbo.register.participants as _with_mandate([{"peer_id": "99999999900000000999", "rules": ["DVT0001"]}], true)
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
 }
 
 test_delegated_call_for_an_unregistered_rule_denied if {
 	result := gbo.response with input as _delegated_input(_integrator)
 		with data.gbo.consent.resolved as _consent
-		with data.entities.dvtp_participant as _with_mandate([{"peer_id": "99999999900000000300", "rules": ["LVG0001"]}], true)
+		with data.gbo.register.participants as _with_mandate([{"peer_id": "99999999900000000300", "rules": ["LVG0001"]}], true)
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
 }
 
 test_delegated_call_from_a_suspended_integrator_denied if {
 	result := gbo.response with input as _delegated_input(_integrator)
 		with data.gbo.consent.resolved as _consent
-		with data.entities.dvtp_participant as _with_mandate(_registered[_integrator].acts_for, false)
+		with data.gbo.register.participants as _with_mandate(_registered[_integrator].acts_for, false)
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
 }
 
@@ -748,7 +750,7 @@ test_delegator_equal_to_caller_is_a_direct_call if {
 test_mandate_comes_after_the_rules_own_reasons if {
 	req := object.union(fx.income(_integrator, "999991772", [2024], {}), {"subject": {"attributes": {"outway_delegator_peer_id": fx.hv}}})
 	result := gbo.response with input as req
-		with data.entities.dvtp_participant as _registered
+		with data.gbo.register.participants as _registered
 	fx.field_codes(result) == {"ACTOR_NOT_ALLOWED"}
 	some d in fx.denied(result)
 	d.trace == [{"rule": "EUD0001", "code": "ACTOR_NOT_ALLOWED", "reasons": ["ACTOR_NOT_ALLOWED", "INTEGRATOR_NOT_REGISTERED"]}]

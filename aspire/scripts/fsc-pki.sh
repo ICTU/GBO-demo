@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Runs an fsc-infra/pki bootstrap script against the AppHost's certportal.
 #
-#   aspire/scripts/fsc-pki.sh fsc-infra/pki/bootstrap-bd-mock.sh
+#   aspire/scripts/fsc-pki.sh fsc-infra/pki/bootstrap-peer.sh bd-mock
 #
-# The bootstrap scripts request their group certificates from certportal with
+# The bootstrap script requests the group certificates from certportal with
 # `docker run --network "$FSC_INFRA_NETWORK" … curl http://certportal:8080`.
 # Under the AppHost the container network has a name of its own per run, so
 # this finds it from the running certportal container, by the compose labels
-# apphost.go puts on every container, and hands it to the script. The scripts
-# themselves are unchanged and skip an organisation whose certificates exist.
+# apphost.go puts on every container, and hands it to the script. The script
+# itself is unchanged and skips a party whose certificates exist.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
