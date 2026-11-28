@@ -2,8 +2,11 @@
 #
 # Read by pki/bootstrap-peer.sh, which generates the certificates from it;
 # `bootstrap-peer.sh --list` prints it for pki/regenerate-internal-certs.sh
-# and the Makefile. Fields are separated by "|"; spaces around a field are
-# ignored. Lines starting with "#" are comments.
+# and the Makefile. scripts/gen-fsc-peers.sh turns the oin column into
+# policies/gbo/fsc_peers.rego, which the policies read: run `make fsc-peers`
+# after changing it (make policy-check fails until then). Fields are
+# separated by "|"; spaces around a field are ignored. Lines starting
+# with "#" are comments.
 #
 #   name           key of the party; also the file name of its group
 #                  certificate: <dir>/pki/org/<name>.pem and <name>-key.pem

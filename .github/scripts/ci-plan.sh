@@ -244,7 +244,12 @@ if [[ "${ci_changed}" == true ]] || matches_any \
   'services/dev-portal-backend/rules.json' \
   'services/ftv-graphql-mapper/*' \
   'scripts/gen-rules-json.sh' \
-  'scripts/gen-graphql-pins.sh'; then
+  'scripts/gen-graphql-pins.sh' \
+  'scripts/gen-fsc-peers.sh' \
+  'scripts/check-fsc-peers.sh' \
+  'fsc-infra/peers.txt' \
+  'fsc-infra/pki/bootstrap-peer.sh' \
+  'services/dvtp-onboarding-register/config/demo.json'; then
   rego=true
 fi
 

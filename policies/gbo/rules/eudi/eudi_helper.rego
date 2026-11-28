@@ -8,15 +8,21 @@ package gbo.rules.eudi.helper
 # verified here; the adapter trusts the disclosure.
 # ═══════════════════════════════════════════════════════════════════════════
 
+import data.gbo.fsc_peers
 import data.gbo.lib
 
 # The designated issuers (as in eIDAS art. 5a designation). The FSC grant
 # admits a peer to the service; this admits it to the EUDI rules. The list
 # says who may issue attestations at all, not which source they read.
+#
+# The EDI issuer's FSC peer comes from fsc-infra/peers.txt. The other two are
+# not parties of the local FSC network: the legal OIN of the demo issuer
+# (services/dev-portal-backend/organizations.json) and the issuer in the
+# simulation.
 designated_issuers := {
 	"99999999900000001700",
 	"0000009961MINEZK0000",
-	"99999999900000000100",
+	fsc_peers.peer_ids["edi-issuer"],
 }
 
 default issuer_designated := false

@@ -8,6 +8,7 @@ package authz
 # data.gbo.consent resolves it from the token in context.headers.
 
 import data.gbo
+import data.gbo.fsc_peers
 
 default allow := false
 
@@ -20,7 +21,7 @@ _metadata_services := {"gbo-metadata-bd", "gbo-metadata-rvig"}
 
 _source_metadata_request if {
 	input.subject.id in {
-		"99999999900000000100", # local Docker Compose
+		fsc_peers.peer_ids["edi-issuer"], # local Docker Compose
 		"0000009961MINEZK0000", # simulation MinEZK
 	}
 	input.subject.attributes.service_name in _metadata_services
@@ -39,7 +40,7 @@ _source_metadata_request if {
 # not GraphQL.
 _ldv_read_services := {"ldv-lezen-bd", "ldv-lezen-brp", "ldv-lezen-lvg"}
 
-_consent_register_peer := "99999999900000000700"
+_consent_register_peer := fsc_peers.peer_ids["consent-register"]
 
 _ldv_read_service if input.subject.attributes.service_name in _ldv_read_services
 
