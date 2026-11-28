@@ -10,6 +10,7 @@ package gbo.rules.asi.asi0001
 # Not checked here: the access token, its scope and the QTSP behind it. The
 # ASIP checks those before it asks.
 
+import data.gbo.fsc_peers
 import data.gbo.lib
 
 rule_id := "ASI0001"
@@ -25,7 +26,7 @@ services := {"brp"}
 # The ASIP's FSC peers in the local demo and the simulation. These are
 # transport identities, not the authentic source's legal OIN.
 asips := {
-	"99999999900000001200", # local demo
+	fsc_peers.peer_ids.asip, # local demo
 	"0000009969GBOASIP000", # simulation ASIP
 }
 

@@ -635,6 +635,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The policies read the FSC peer IDs of the parties from
+  `fsc-infra/peers.txt`**: `scripts/gen-fsc-peers.sh` (`make fsc-peers`)
+  generates `policies/gbo/fsc_peers.rego` from it, and `authz`, ASI0001 and
+  the EUDI issuer list use that instead of their own copies.
+  `scripts/check-fsc-peers.sh` (`make fsc-peers-check`, part of
+  `make policy-check` and the rego job in CI) fails when that file is stale
+  or when the DVTP onboarding register's `demo.json` names a peer that
+  `peers.txt` does not hold. Decisions are unchanged.
 - **The safety audit runs in CI** (`safety` job, `make check-safety`) and
   scans every tracked file. It now flags OINs with a real register prefix;
   test data uses demo OINs (`99999999…`) instead.
