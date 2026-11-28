@@ -62,7 +62,8 @@ developer-portal/public/eudi-offers.json
 dashboard/node_modules/
 dashboard/dist/
 
-# Certs (generated)
+# Output of the removed certs/generate.sh. Kept ignored so stale local
+# keys from older checkouts are never committed.
 certs/*.pem
 certs/*.csr
 certs/*.srl
