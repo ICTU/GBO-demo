@@ -1,4 +1,4 @@
-.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-certs fsc-down fsc-test fsc-clean \
+.PHONY: up down logs clean require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-certs fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-consent-authorization fsc-seed-ldv-lezen fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
         require-development-cas create-development-registrar-root provision-wallet-registration provision-test-pid provision-qtsp-wallet-registration credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier provision-asi-eudi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
@@ -150,15 +150,14 @@ policy-test: policy-check
 check-safety:
 	./scripts/check-safety.sh
 
-up: policy-check certs require-ftv-postgres
+up: policy-check require-ftv-postgres
 	docker compose up --build -d
 
 down:
 	docker compose down
 
 # ── Demo bootstrap targets ───────────────────────────────────────────────
-# Each target brings up one of the compose-profile combinations. Certs
-# are auto-generated on first run (idempotent); subsequent runs skip.
+# Each target brings up one of the compose-profile combinations.
 #
 #   make demo          → default DvTP flow (over real FSC via Hypotheekverlener-mock)
 #   make demo-minimal  → base only: openftv-pdp/sources/consent-register/logbooks/dev-portal + observability
@@ -170,7 +169,7 @@ down:
 
 demo: demo-dvtp
 
-demo-minimal: policy-check certs require-ftv-postgres
+demo-minimal: policy-check require-ftv-postgres
 	@echo "-> Base stack (no profile)"
 	docker compose up --build -d
 	@echo ""
@@ -185,7 +184,7 @@ demo-minimal: policy-check certs require-ftv-postgres
 # The PDP pulls its bundle once, at boot, so the Manager is seeded first.
 MANAGER_COMPOSE = GBO_BUNDLE_MANAGER=http://openftv-manager:9443/v1/bundle/gbo-pdp docker compose --profile manager
 
-demo-manager: policy-check certs require-ftv-postgres
+demo-manager: policy-check require-ftv-postgres
 	@test -n "$(KEYCLOAK_ADMIN_PASSWORD)" || (echo "KEYCLOAK_ADMIN_PASSWORD is required" >&2; exit 1)
 	@test -n "$(FTV_MANAGER_AUDITOR_PASSWORD)" || (echo "FTV_MANAGER_AUDITOR_PASSWORD is required" >&2; exit 1)
 	@test -n "$(FTV_MANAGER_DEPLOY_PASSWORD)" || (echo "FTV_MANAGER_DEPLOY_PASSWORD is required" >&2; exit 1)
@@ -207,7 +206,7 @@ manager-seed: policy-check
 	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
 	docker compose --profile manager restart openftv-pdp
 
-demo-dvtp: policy-check certs require-ftv-postgres fsc-all-up fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-consent-authorization fsc-seed-lvg fsc-seed-ldv-lezen
+demo-dvtp: policy-check require-ftv-postgres fsc-all-up fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-consent-authorization fsc-seed-lvg fsc-seed-ldv-lezen
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"
 	docker compose --profile dvtp up --build -d
 	@echo ""
@@ -482,7 +481,7 @@ reconcile-sources:
 # Complete, idempotent local onboarding for both demo sources. The sequence is
 # explicit so a clean checkout cannot reach eudi-config before metadata has
 # been published, transported through FSC, verified and activated.
-onboard-demo-sources: require-development-cas certs
+onboard-demo-sources: require-development-cas
 	$(MAKE) fsc-all-up
 	$(MAKE) source-metadata-up
 	$(MAKE) fsc-seed-bri
@@ -578,9 +577,6 @@ logs:
 clean:
 	docker compose down -v --rmi local
 
-certs:
-	@if [ ! -f certs/ca.pem ]; then cd certs && bash generate.sh; fi
-
 # --- FSC-infra (productionisation) --------------------------------------
 # Runs our own root-CA + certportal. Separate from the main demo stack.
 
@@ -625,7 +621,7 @@ fsc-pdp-cert:
 # starts *after* fsc-infra; this pulls it forward. The PDP loads its policies
 # before it serves and reads the onboarding register live, so once --wait
 # sees it healthy it decides on contracts.
-pdp-up: policy-check certs require-ftv-postgres fsc-pdp-cert
+pdp-up: policy-check require-ftv-postgres fsc-pdp-cert
 	docker compose up --build -d --wait --force-recreate openftv-pdp
 
 fsc-all-up: fsc-certs fsc-pdp-cert

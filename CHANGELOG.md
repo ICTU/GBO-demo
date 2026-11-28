@@ -1225,6 +1225,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   the ICTU GitHub policy.
 
 ### Removed
+- **`certs/generate.sh` and the `make certs` target.** The script made a
+  self-signed CA with a server and a client certificate in `certs/`, and
+  `up`, `demo-minimal`, `demo-manager`, `demo-dvtp`, `onboard-demo-sources`
+  and `pdp-up` ran it first, but no container, chart or script ever read
+  those files. The FSC certificates come from `fsc-infra/pki/` (`make
+  fsc-certs`) and the PDP's TLS pair from `make fsc-pdp-cert`. A local
+  `certs/` directory left by an older checkout can be deleted.
 - **Unused code paths are gone.** The `eudi-adapter` no longer writes
   `source-release.json` next to a materialized configuration; nothing read
   it. Materializing still prints the release id, and the adapter still logs
